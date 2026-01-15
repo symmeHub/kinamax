@@ -58,9 +58,6 @@ class Container:
         return df
 
 
-
-
-
 @register_dataclass
 @dataclass
 class AttractorFinderConfig(Container):
@@ -485,8 +482,9 @@ def post_process_attractor_finder_results(
     max_attractors = target_subharmonics.max()
 
     df_init_conditions = pl.DataFrame(
-        { k: flattened_init[:, i].repeat(max_attractors)
-           for i, k in enumerate(state_vector_labels)
+        {
+            k: flattened_init[:, i].repeat(max_attractors)
+            for i, k in enumerate(state_vector_labels)
         }
     )
 
@@ -508,10 +506,8 @@ def post_process_attractor_finder_results(
         limit = sh if sh != 0 else max_detected
         balanced.append(group.group_by("sim_label").head(limit))
 
-    return (
-        pl.concat(balanced, how="vertical")
-        .sort(["sim_label", "attractor_label"])
-    )
+    return pl.concat(balanced, how="vertical").sort(["sim_label", "attractor_label"])
+
 
 def cluster_points(points, weights, distance_threshold=0.01, method="dbscan"):
     """
