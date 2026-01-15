@@ -17,6 +17,7 @@ class H46Problem(Container):
     w0: jax.Array = 121.0
     Q: jax.Array = 87.0
     Ad: jax.Array = 2.5
+
     state_vector_labels: ClassVar = ["x", "dotx", "Eh"]
     params_labels: ClassVar = ["xw", "w0", "Ad", "Q", "fd"]
     # label_col: ClassVar = "problem_id"
