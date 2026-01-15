@@ -2,7 +2,7 @@
 
 This script demonstrates how to:
 
-1. Construct a driven oscillator (`H46Problem`) with a frequency sweep.
+1. Construct a driven oscillator (`H46Problem`) with multiple start points and a frequency sweep.
 2. Configure an `AttractorFinder` that integrates trajectories until they converge.
 3. Vectorise the attractor search across both initial conditions and frequency values.
 4. Persist the processed results to disk for downstream analysis.
@@ -21,10 +21,21 @@ from diffrax import Tsit5, PIDController
 import numpy as np
 import polars as pl
 import equinox as eqx
-from kinamax.core import AttractorFinder, AttractorFinderConfig, post_process_attractor_finder_results
-from kinamax.problems import H46Problem
+from kinamax.core import (
+    AttractorFinder,
+    AttractorFinderConfig,
+    post_process_attractor_finder_results,
+)
+# from kinamax.problems import H46Problem
+from models import H46_EM_Problem
 
 config.update("jax_enable_x64", True)  # Use double precision for improved accuracy
+
+
+
+
+
+problem_class = H46_EM_Problem
 
 
 def build_batched_finder(find_attractors_fn):
@@ -61,7 +72,7 @@ def build_batched_finder(find_attractors_fn):
         vmap(
             vmap(find_attractors_fn, in_axes=(None, 0, None)),
             in_axes=(
-                H46Problem(fd=0, xw=None, Q=None, Ad=None, w0=None),
+                problem_class(fd=0, xw=None, Q=None, Ad=None, w0=None, alpha=None, C0=None, R=None, L=None, M=None),
                 None,
                 AttractorFinderConfig(
                     init_time=None,
@@ -75,7 +86,11 @@ def build_batched_finder(find_attractors_fn):
     )
 
 
-def save_results(data: pl.DataFrame, output_dir: str = "outputs", filename: str = "simulations.parquet"):
+def save_results(
+    data: pl.DataFrame,
+    output_dir: str = "outputs",
+    filename: str = "simulations.parquet",
+):
     """Persist processed attractor finder results to disk.
 
     Parameters
@@ -114,8 +129,8 @@ def main():
     5. Save the tidy table to ``docs/examples/time_integration/outputs`` so the
        companion tutorial in the documentation can visualise the attractors.
     """
-    # Frequency sweep (Hz): here just a single point at 50 Hz
-    fd = jnp.linspace(10.0, 60.0, 51)
+    
+    fd = jnp.linspace(30.0, 60.0, 32) # Frequency sweep (Hz)
     finder_config = AttractorFinderConfig(
         convergence_tol=1.0e-10,
         target_frequency=fd,
@@ -135,13 +150,14 @@ def main():
         solver=solver,
     )
 
-    problem = H46Problem(fd=fd, Ad=2.5)
+    
+    problem = problem_class(fd=fd, Ad=2.5)
     key = jax.random.PRNGKey(758493)
-    Nstart = 20
+    Nstart = 40
     init_conditions = (
-        (jax.random.uniform(key, shape=(Nstart, 3)) - 0.5)
+        (jax.random.uniform(key, shape=(Nstart, 5)) - 0.5)
         * 2.0
-        * jnp.array([5.0 * problem.xw, 10.0 * problem.xw * problem.w0, 0.0])
+        * jnp.array([5.0 * problem.xw, 10.0 * problem.xw * problem.w0, 1.0, 0.0, 0.0])
     )
 
     batched_find = build_batched_finder(attractor_finder.find_attractors)
@@ -152,13 +168,13 @@ def main():
     )
 
     processed = post_process_attractor_finder_results(
-        problem_class=H46Problem,
+        problem_class=problem_class,
         problems=problems,
         finder_configs=finder_configs,
         init_conditions=vmaped_init,
         solutions=solutions,
         target_subharmonics=target_subharmonics,
-        solution_state_labels=[lab + "a" for lab in H46Problem.state_vector_labels],
+        solution_state_labels=[lab + "a" for lab in problem_class.state_vector_labels],
     )
     save_results(processed)
 

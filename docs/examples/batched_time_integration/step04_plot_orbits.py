@@ -33,6 +33,18 @@ def _(alt, mo, orbits):
 
 
 @app.cell
+def _(alt, mo, orbits):
+    chart4 = mo.ui.altair_chart(alt.Chart(orbits).mark_point().encode(
+        x='fd',
+        y=alt.Y('Ev').scale(type='log'),
+        color='detected_subharmonic'
+    ))
+
+    chart4
+    return
+
+
+@app.cell
 def _(orbits):
     orbits.group_by("orbit_label").sum()
     return
@@ -50,7 +62,8 @@ def _(orbits, pl):
     orbit_energy = orbits["orbit_label", "Eh"].group_by("orbit_label").sum()
     orbit_energy
     orbit_data = unique_orbits.join(orbit_energy, on="orbit_label", how="inner")
-    orbit_data = orbit_data.with_columns((pl.col("Eh") * pl.col("fd") / pl.col("detected_subharmonic")).alias("Ph"))
+    #orbit_data = orbit_data.with_columns((pl.col("Eh") * pl.col("fd") / pl.col("detected_subharmonic")).alias("Ph"))
+    orbit_data = orbit_data.with_columns((pl.col("Eh") * pl.col("fd")).alias("Ph"))
     orbit_data
     return (orbit_data,)
 
@@ -80,9 +93,9 @@ def _(alt, orbit_data, pl):
 
     chart3 = (
         alt.Chart(
-            orbit_data.with_columns((pl.col("Ph") * 1000.).alias("Ph_scaled"))
+            orbit_data.with_columns((pl.col("Ph") * 1000.0).alias("Ph_scaled"))
         )
-        .mark_circle(size=80)
+        .mark_circle(size=100)
         .encode(
             x=alt.X("fd:Q").title("Drive Frequency [Hz]"),
             y=alt.Y("Ph_scaled").scale(type="log").title("Harvested Power [mW]"),
@@ -97,7 +110,9 @@ def _(alt, orbit_data, pl):
             shape="detected_subharmonic:N",
             tooltip=["orbit_label", "fd", "Ph", "detected_subharmonic"],
         )
-        .properties(title="Mechanical Dissipated Power $P_h$")
+        .properties(
+            title="Damping dissipation vs. Drive Frequency", width=800, height=400
+        )
     ).interactive()
 
     chart3.show()
