@@ -67,6 +67,7 @@ class OrbitCalculator(NamedTuple):
         # tg[0] = 0.
         # tg[1] = 1.0
         ts = t0 + tg * (Td / Ns)
+        #ts = ts.at[-1].set(t1)
         saveat = SaveAt(ts=ts)
         sol = diffeqsolve(
             term,
@@ -103,7 +104,7 @@ problem = problem_class(**{k: ode_params[k][aid] for k in ode_params_labels})
 problems = problem_class(**ode_params)
 
 
-calculator = OrbitCalculator()
+calculator = OrbitCalculator(samples_per_period = 200)
 calculator_fn = jax.jit(jax.vmap(calculator.calculate_orbit))
 # orbit = calculator_fn(problem, Xa=Xa[aid], init_time=init_times[aid], target_frequency=target_frequencies[aid], init_time_step=init_time_steps[aid])
 calculated_orbits = np.array(
@@ -142,4 +143,13 @@ energy_per_period = pl.from_dicts(dicts)
 orbits = orbits.drop("Eh").join(
     energy_per_period, on=["orbit_label", "attractor_label"], how="right"
 )
+
 orbits.write_parquet(f"{working_dir}/orbits.parquet")
+
+
+unique_orbits = orbits.unique(subset=["orbit_label"], keep="first")["orbit_label", "fd", "detected_subharmonic"]
+orbit_energy = orbits["orbit_label", "Eh"].group_by("orbit_label").mean()
+orbit_energy
+orbit_data = unique_orbits.join(orbit_energy, on="orbit_label", how="inner")
+orbit_data = orbit_data.with_columns((pl.col("Eh") * pl.col("fd")).alias("Ph"))
+orbit_data.write_parquet(f"{working_dir}/orbit_data.parquet")

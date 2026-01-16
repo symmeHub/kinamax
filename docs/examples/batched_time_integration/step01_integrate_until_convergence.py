@@ -130,7 +130,7 @@ def main():
        companion tutorial in the documentation can visualise the attractors.
     """
     
-    fd = jnp.linspace(30.0, 60.0, 32) # Frequency sweep (Hz)
+    fd = jnp.linspace(10.0, 60.0, 51) # Frequency sweep (Hz)
     finder_config = AttractorFinderConfig(
         convergence_tol=1.0e-10,
         target_frequency=fd,
@@ -138,14 +138,13 @@ def main():
         init_time_step=1.0e-3,
         subharmonic_factor=10,
     )
-
     solver = Tsit5()
     controller = PIDController(rtol=1e-8, atol=1e-9)
     target_subharmonics = np.array([1, 2, 3, 5], dtype=int)
     attractor_finder = AttractorFinder(
         residuals_per_period=20,
         targetted_subharmonics=target_subharmonics,
-        max_periods=5000,
+        max_periods=2000,
         controller=controller,
         solver=solver,
     )
