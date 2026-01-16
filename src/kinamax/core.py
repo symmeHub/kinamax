@@ -511,7 +511,36 @@ def post_process_attractor_finder_results(
 
 def cluster_points(points, weights, distance_threshold=0.01, method="dbscan"):
     """
-    xxx
+    Cluster points in a weighted feature space and return cluster centroids.
+
+    The input points are scaled elementwise by ``weights`` before clustering,
+    but centroids are computed in the original (unweighted) point space.
+
+    Args:
+        points (array-like): Array of shape ``(n_points, n_dims)`` containing the
+            points to cluster.
+        weights (array-like): Per-dimension scaling factors broadcastable to
+            ``points`` (typically shape ``(n_dims,)``).
+        distance_threshold (float, optional): Clustering scale parameter.
+            - For ``method="dbscan"`` / ``"dbscan_cuml"``: used as DBSCAN ``eps``.
+            - For ``method="agglomerative-clustering"``: used as
+              ``AgglomerativeClustering(distance_threshold=...)`` with
+              ``n_clusters=None`` and ``linkage="ward"``.
+        method (str, optional): Clustering backend. One of
+            ``{"dbscan", "dbscan_cuml", "agglomerative-clustering"}``.
+
+    Returns:
+        tuple:
+            - nclusters (int): Number of unique cluster labels.
+            - labels (np.ndarray): Array of shape ``(n_points,)`` with the cluster
+              label for each point.
+            - centroids (np.ndarray): Array of shape ``(nclusters, n_dims)`` with
+              the mean of points belonging to each cluster label.
+
+    Notes:
+        - DBSCAN is configured with ``min_samples=1``, so points are not treated
+          as noise (i.e. labels are expected to be ``0..nclusters-1``).
+        - ``method="dbscan_cuml"`` requires ``cuml`` to be installed and importable.
     """
     if len(points) > 1:
         X = points * weights  # Array CPU
