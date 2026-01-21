@@ -1,209 +1,95 @@
-"""Time integration tutorial for the H46 problem.
+"""Single (non-batched) time integration until convergence for the H46 problem.
 
-This script demonstrates how to:
+This example mirrors the batched tutorial in
+`docs/examples/batched_time_integration/`, but runs a *single* simulation:
 
-1. Construct a driven oscillator (`H46Problem`) with a frequency sweep.
-2. Configure an `AttractorFinder` that integrates trajectories until they converge.
-3. Vectorise the attractor search across both initial conditions and frequency values.
-4. Persist the processed results to disk for downstream analysis.
+- one driven oscillator (`kinamax.problems.H46Problem`)
+- one drive frequency (`fd`)
+- one initial condition (`X0`)
 
-Each function below contains detailed docstrings so the file can be read top to
-bottom as a self-contained tutorial. The code is intentionally explicit about
-what gets configured and why, mirroring the steps required when adapting the
-workflow to a new problem.
+It integrates until the subharmonic shooting residuals satisfy the convergence
+tolerance, then writes a tidy results table to `outputs/simulations.parquet`.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
-from jax import numpy as jnp
+
 import jax
-from jax import config, vmap
-from diffrax import Tsit5, PIDController
+from jax import config
+import jax.numpy as jnp
 import numpy as np
 import polars as pl
-import equinox as eqx
-from kinamax.core import AttractorFinder, AttractorFinderConfig, post_process_attractor_finder_results
+from diffrax import PIDController, Tsit5
+
+from kinamax.core import (
+    AttractorFinder,
+    AttractorFinderConfig,
+    post_process_attractor_finder_results,
+)
 from kinamax.problems import H46Problem
 
 config.update("jax_enable_x64", True)  # Use double precision for improved accuracy
 
 
-fd = 50.
-finder_config = AttractorFinderConfig(
-    convergence_tol=1.0e-10,
-    target_frequency=fd,
-    init_time=0.0,
-    init_time_step=1.0e-3,
-    subharmonic_factor=10,
-)
+def main() -> None:
+    output_dir = Path(__file__).resolve().parent / "outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-solver = Tsit5()
-controller = PIDController(rtol=1e-8, atol=1e-9)
-target_subharmonics = np.array([1, 2, 3, 4, 5], dtype=int)
-attractor_finder = AttractorFinder(
-    residuals_per_period=10,
-    targetted_subharmonics=target_subharmonics,
-    max_periods=5000,
-    controller=controller,
-    solver=solver,
-)
+    fd = 50.0
+    problem_class = H46Problem
+    problem = problem_class(fd=jnp.array(fd), Ad=jnp.array(2.5))
 
-problem = H46Problem(fd=fd, Ad=2.5)
-key = jax.random.PRNGKey(758493)
+    finder_config = AttractorFinderConfig(
+        convergence_tol=jnp.array(1.0e-10),
+        target_frequency=fd,
+        init_time=jnp.array(0.0),
+        init_time_step=jnp.array(1.0e-3),
+        subharmonic_factor=10.0,
+    )
 
-init_condition = jnp.array([0.0, 0.0, 0.0])
+    solver = Tsit5()
+    controller = PIDController(rtol=1e-8, atol=1e-9)
+    target_subharmonics = np.array([1, 2, 3, 5], dtype=int)
+    attractor_finder = AttractorFinder(
+        residuals_per_period=np.array(20, int),
+        targetted_subharmonics=target_subharmonics,
+        max_periods=2000,
+        controller=controller,
+        solver=solver,
+    )
 
-single_find = attractor_finder.find_attractors
-problem, finder_configs, vmaped_init, solutions = single_find(
-    problem,
-    init_condition,
-    finder_config,
-)
+    key = jax.random.PRNGKey(758493)
+    init_condition = (
+        (jax.random.uniform(key, shape=(len(problem_class.state_vector_labels),)) - 0.5)
+        * 2.0
+        * jnp.array([5.0 * problem.xw, 10.0 * problem.xw * problem.w0, 0.0])
+    )
 
-# processed = post_process_attractor_finder_results(
-#     problem_class=H46Problem,
-#     problems=problems,
-#     finder_configs=finder_configs,
-#     init_conditions=vmaped_init,
-#     solutions=solutions,
-#     target_subharmonics=target_subharmonics,
-#     solution_state_labels=["xa", "dotxa"],
-# )
+    find_one = jax.jit(
+        lambda p, x0, cfg: attractor_finder.find_attractors(p, x0, cfg)
+    )
+    problem, finder_config, init_condition, solution = find_one(
+        problem, init_condition, finder_config
+    )
 
-# def build_batched_finder(find_attractors_fn):
-#     """Return a JIT-compiled attractor finder that runs on a batch of problems.
+    processed = post_process_attractor_finder_results(
+        problem_class=problem_class,
+        problems=problem,
+        finder_configs=finder_config,
+        init_conditions=init_condition,
+        solutions=solution,
+        target_subharmonics=target_subharmonics,
+        solution_state_labels=[lab + "a" for lab in problem_class.state_vector_labels],
+    )
 
-#     The raw ``AttractorFinder.find_attractors`` routine expects a single dynamical
-#     system, a single initial condition, and a single configuration. When exploring
-#     basins of attraction, we typically want to evaluate many initial conditions for
-#     the same problem (or multiple frequency points) and execute the search on
-#     accelerator hardware. This helper function wraps the user provided
-#     ``find_attractors_fn`` in two layers of `jax.vmap` to broadcast over:
-
-#     - the ``H46Problem`` instances that capture the drive frequency sweep,
-#     - the initial conditions to seed the integration,
-#     - the ``AttractorFinderConfig`` objects that contain per-frequency metadata.
-
-#     Once vectorised, the whole routine is `jax.jit` compiled through Equinox
-#     (`eqx.filter_jit`) so that arrays are traced efficiently and PyTrees coming
-#     from dataclasses are handled automatically.
-
-#     Parameters
-#     ----------
-#     find_attractors_fn:
-#         Callable matching the signature of ``AttractorFinder.find_attractors``.
-
-#     Returns
-#     -------
-#     Callable
-#         A compiled function that simultaneously integrates every combination of
-#         problem, initial condition, and configuration provided.
-#     """
-
-#     return eqx.filter_jit(
-#         vmap(
-#             vmap(find_attractors_fn, in_axes=(None, 0, None)),
-#             in_axes=(
-#                 H46Problem(fd=0, xw=None, Q=None, Ad=None, w0=None),
-#                 None,
-#                 AttractorFinderConfig(
-#                     init_time=None,
-#                     init_time_step=None,
-#                     convergence_tol=None,
-#                     target_frequency=0,
-#                     subharmonic_factor=None,
-#                 ),
-#             ),
-#         )
-#     )
+    out_path = output_dir / "simulations.parquet"
+    processed.write_parquet(out_path)
+    pl.Config.set_tbl_rows(8)
+    print(processed)
+    print(f"Wrote: {out_path}")
 
 
-# def save_results(data: pl.DataFrame, output_dir: str = "outputs", filename: str = "simulations.parquet"):
-#     """Persist processed attractor finder results to disk.
+if __name__ == "__main__":
+    main()
 
-#     Parameters
-#     ----------
-#     data:
-#         Polars DataFrame containing the flattened attractor metadata and summary
-#         statistics produced by :func:`post_process_attractor_finder_results`.
-#     output_dir:
-#         Directory (relative to this script) where the parquet file will be written.
-#         The directory is created automatically if it does not exist.
-#     filename:
-#         Name of the parquet file. Use the default when following this tutorial so
-#         the downstream notebooks can discover the expected artifact.
-#     """
-
-#     target_dir = Path(output_dir)
-#     target_dir.mkdir(parents=True, exist_ok=True)
-#     data.write_parquet(str(target_dir / filename))
-
-
-# def main():
-#     """Execute the full integration workflow for the tutorial example.
-
-#     The steps are deliberately spelled out to emphasise how each component fits
-#     together:
-
-#     1. Define a single-point frequency sweep and populate the attractor finder
-#        configuration with tolerances and integration spacing.
-#     2. Instantiate the `Tsit5` solver and `PIDController` that control the adaptive
-#        time stepping during integration.
-#     3. Sample a grid of random initial conditions inside a bounding box scaled by
-#        the problem's characteristic width (`xw`) so that we explore a range of
-#        possible basins.
-#     4. Call :func:`build_batched_finder` to obtain a vectorised attractor finder,
-#        run it, and post-process the results into a tidy table.
-#     5. Save the tidy table to ``docs/examples/time_integration/outputs`` so the
-#        companion tutorial in the documentation can visualise the attractors.
-#     """
-#     # Frequency sweep (Hz): here just a single point at 50 Hz
-#     fd = jnp.linspace(50.0, 51.0, 1)
-#     finder_config = AttractorFinderConfig(
-#         convergence_tol=1.0e-10,
-#         target_frequency=fd,
-#         init_time=0.0,
-#         init_time_step=1.0e-3,
-#         subharmonic_factor=10,
-#     )
-
-#     solver = Tsit5()
-#     controller = PIDController(rtol=1e-8, atol=1e-9)
-#     target_subharmonics = np.array([1, 2, 3, 4, 5], dtype=int)
-#     attractor_finder = AttractorFinder(
-#         residuals_per_period=10,
-#         targetted_subharmonics=target_subharmonics,
-#         max_periods=5000,
-#         controller=controller,
-#         solver=solver,
-#     )
-
-#     problem = H46Problem(fd=fd, Ad=2.5)
-#     key = jax.random.PRNGKey(758493)
-#     Nstart = 50
-#     init_conditions = (
-#         (jax.random.uniform(key, shape=(Nstart, 3)) - 0.5)
-#         * 2.0
-#         * jnp.array([5.0 * problem.xw, 10.0 * problem.xw * problem.w0, 0.0])
-#     )
-
-#     batched_find = build_batched_finder(attractor_finder.find_attractors)
-#     problems, finder_configs, vmaped_init, solutions = batched_find(
-#         problem,
-#         init_conditions,
-#         finder_config,
-#     )
-
-#     processed = post_process_attractor_finder_results(
-#         problem_class=H46Problem,
-#         problems=problems,
-#         finder_configs=finder_configs,
-#         init_conditions=vmaped_init,
-#         solutions=solutions,
-#         target_subharmonics=target_subharmonics,
-#         solution_state_labels=["xa", "dotxa"],
-#     )
-#     save_results(processed)
-
-
-# if __name__ == "__main__":
-#     main()
