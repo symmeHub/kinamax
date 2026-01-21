@@ -63,6 +63,12 @@ python step02_detect_orbits.py
 python step03_calculate_orbits.py
 ```
 
+Or run the convenience script that executes steps 1–3 in order:
+
+```bash
+bash run_steps_1_to_3.sh
+```
+
 Then open `step04_plots.ipynb` in Jupyter to generate plots.
 
 ## Tips for adapting

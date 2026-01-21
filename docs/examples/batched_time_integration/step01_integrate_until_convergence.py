@@ -130,7 +130,7 @@ def main():
        companion tutorial in the documentation can visualise the attractors.
     """
     
-    fd = jnp.linspace(10.0, 60.0, 51) # Frequency sweep (Hz)
+    fd = jnp.linspace(20, 50.0, 31) # Frequency sweep (Hz)
     finder_config = AttractorFinderConfig(
         convergence_tol=1.0e-10,
         target_frequency=fd,
@@ -152,7 +152,7 @@ def main():
     
     problem = problem_class(fd=fd, Ad=2.5)
     key = jax.random.PRNGKey(758493)
-    Nstart = 40
+    Nstart = 20
     init_conditions = (
         (jax.random.uniform(key, shape=(Nstart, 5)) - 0.5)
         * 2.0
