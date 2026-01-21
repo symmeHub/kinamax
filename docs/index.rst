@@ -1,4 +1,4 @@
-Welcome to kymatax's documentation!
+Welcome to kinamax's documentation!
 ===================================
 
 .. toctree::
@@ -9,7 +9,7 @@ Welcome to kymatax's documentation!
 API Reference
 -------------
 
-.. automodule:: kymatax
+.. automodule:: kinamax
    :members:
    :undoc-members:
    :show-inheritance:
