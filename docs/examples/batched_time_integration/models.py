@@ -9,7 +9,26 @@ from jax.tree_util import register_dataclass
 @dataclass
 class H46_EM_Problem(Container):
     """
-    H46 Problem
+    H46 benchmark problem with electromechanical (EM) coupling.
+
+    The state is ordered as ``X = [x, dotx, v, Ev, Eh]``:
+    - ``x``: mechanical displacement
+    - ``dotx``: mechanical velocity
+    - ``v``: electrical voltage
+    - ``Ev``: cumulative viscous dissipation energy (integral of ``Pv``)
+    - ``Eh``: cumulative Joule heating energy (integral of ``Ph``)
+
+    Parameters (as used in :meth:`rhs`):
+    - ``xw``: well position characteristic length
+    - ``w0``: natural angular frequency
+    - ``Q``: mechanical quality factor
+    - ``fd``: drive frequency
+    - ``Ad``: drive amplitude 
+    - ``alpha``: EM coupling coefficient
+    - ``C0``: capacitance
+    - ``R``: electrical resistance
+    - ``L``: beam length
+    - ``M``: effective mass
     """
 
     xw: jax.Array = 0.5e-3
@@ -21,29 +40,41 @@ class H46_EM_Problem(Container):
     C0: jax.Array = 1.05e-6
     R: jax.Array = 7.83e3
     L: jax.Array = 25e-3
-    M :jax.Array = 17.3e-3
+    M: jax.Array = 17.3e-3
     state_vector_labels: ClassVar = ["x", "dotx", "v", "Ev", "Eh"]
     params_labels: ClassVar = ["xw", "w0", "Ad", "Q", "fd", "alpha", "C0", "R", "L", "M"]
 
-    def state_weights(self):
+    def state_weights(self) -> jax.Array:
         """
-        Returns the state weights for the system.
+        Return per-state scaling weights.
+
+        The first two components scale displacement and velocity by the
+        characteristic length ``xw`` and the frequency scale ``w0``.
+
         Returns:
-            jnp.ndarray: State weights.
+            jax.Array: Array of shape ``(5,)`` aligned with ``[x, dotx, v, Ev, Eh]``.
         """
         xw = self.xw
         w0 = self.w0
         return jnp.array([1.0 / xw, 1.0 / (w0 * xw), 1.0, 0.0, 0.0])
 
-    def rhs(self, t, X, args=None):
+    def rhs(self, t: jax.Array, X: jax.Array, args=None) -> jax.Array:
         """
-        Right-hand side of the ODE.
+        Right-hand side of the coupled ODE system.
+
+        Notes:
+            - ``args`` is accepted for API compatibility but is not used.
+            - The last two states ``Ev`` and ``Eh`` integrate the instantaneous
+              powers ``Pv`` and ``Ph`` respectively (i.e. ``dEv/dt = Pv``,
+              ``dEh/dt = Ph``).
+
         Args:
-            t (float): Time.
-            X (jnp.ndarray): State vector.
-            args (tuple, optional): Additional arguments. Defaults to None.
+            t: Time.
+            X: State vector ``[x, dotx, v, Ev, Eh]``.
+            args: Unused extra arguments.
+
         Returns:
-            jnp.ndarray: Derivative of the state vector.
+            jax.Array: Time derivative ``dX/dt`` with the same ordering as ``X``.
         """
         xw = self.xw
         w0 = self.w0
