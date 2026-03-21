@@ -1,19 +1,52 @@
-# Calculate orbits from attractors.
+# ---
+# jupyter:
+#   jupytext:
+#     text_representation:
+#       extension: .py
+#       format_name: percent
+#       format_version: '1.3'
+#       jupytext_version: 1.16.7
+#   kernelspec:
+#     display_name: Python 3
+#     language: python
+#     name: python3
+# ---
+
+# %% [markdown]
+# # Step 3: Reconstruct One-Period Orbits From The Attractors
+#
+# This notebook starts from the orbit representatives produced in Step 2 and
+# integrates one drive period from each attractor state.
+#
+# It writes:
+#
+# - one parquet file per reconstructed orbit in `outputs/orbits_from_attractors/`,
+# - an updated `outputs/orbits.parquet`,
+# - a compact per-orbit summary in `outputs/orbit_data.parquet`.
+
+# %%
+from pathlib import Path
+from typing import NamedTuple
 
 import jax
-import polars as pl
-
-# from kinamax.problems import H46Problem
 import jax.numpy as jnp
-from diffrax import ODETerm, SaveAt, diffeqsolve, Tsit5, PIDController
-from typing import NamedTuple
 import numpy as np
-from pathlib import Path
+import polars as pl
+from diffrax import ODETerm, PIDController, SaveAt, Tsit5, diffeqsolve
+
 from models import H46_EM_Problem
 
 problem_class = H46_EM_Problem
 
 
+# %% [markdown]
+# ## Helper To Reorder Simulations By Orbit
+#
+# Each detected attractor belongs to one orbit label. This helper reconstructs
+# the matching simulation metadata in the same order as the attractor table so
+# that parameters and initial times remain aligned.
+
+# %%
 def stack_simulations(orbits, sim_orbit, simulations):
     attractor_orbit_map = dict(
         zip(orbits["attractor_label"].to_list(), orbits["orbit_label"].to_list())
@@ -38,6 +71,13 @@ def stack_simulations(orbits, sim_orbit, simulations):
     return stacked
 
 
+# %% [markdown]
+# ## One-Period Orbit Integrator
+#
+# For each attractor state, the calculator integrates one forcing period and
+# returns `samples_per_period` snapshots.
+
+# %%
 class OrbitCalculator(NamedTuple):
     samples_per_period: int = np.array(60)
 
@@ -84,29 +124,41 @@ class OrbitCalculator(NamedTuple):
         return sol.ys
 
 
-working_dir = "outputs"
-simulations = pl.read_parquet(f"{working_dir}/simulations.parquet")
-orbits = pl.read_parquet(f"{working_dir}/orbits.parquet")
-sim_orbit = pl.read_parquet(f"{working_dir}/sim_orbit.parquet")
+# %% [markdown]
+# ## Load The Outputs Of The Previous Stages
+#
+# This stage consumes the simulation table from Step 1 and the orbit metadata
+# from Step 2.
+
+# %%
+example_dir = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
+working_dir = example_dir / "outputs"
+
+simulations = pl.read_parquet(working_dir / "simulations.parquet")
+orbits = pl.read_parquet(working_dir / "orbits.parquet")
+sim_orbit = pl.read_parquet(working_dir / "sim_orbit.parquet")
 state_vec_labels = problem_class.state_vector_labels
 attractor_state_vec_labels = [f"{k}a" for k in state_vec_labels]
 ode_params_labels = problem_class.params_labels
 stacked_sims = stack_simulations(orbits, sim_orbit, simulations)
 ode_params = {k: jnp.array(stacked_sims[k].to_numpy()) for k in ode_params_labels}
-sim_labels = jnp.array(stacked_sims["sim_label"].to_numpy())
 target_frequencies = jnp.array(stacked_sims["target_frequency"].to_numpy())
 init_times = jnp.array(stacked_sims["init_time"].to_numpy())
 init_time_steps = jnp.array(stacked_sims["init_time_step"].to_numpy())
 Xa = jnp.array(orbits[state_vec_labels].to_numpy())
 
-aid = 0
-problem = problem_class(**{k: ode_params[k][aid] for k in ode_params_labels})
 problems = problem_class(**ode_params)
 
 
-calculator = OrbitCalculator(samples_per_period = 200)
+# %% [markdown]
+# ## Integrate One Period From Every Attractor
+#
+# `vmap` applies the one-period integrator to every detected attractor while
+# keeping the corresponding problem parameters aligned.
+
+# %%
+calculator = OrbitCalculator(samples_per_period=200)
 calculator_fn = jax.jit(jax.vmap(calculator.calculate_orbit))
-# orbit = calculator_fn(problem, Xa=Xa[aid], init_time=init_times[aid], target_frequency=target_frequencies[aid], init_time_step=init_time_steps[aid])
 calculated_orbits = np.array(
     calculator_fn(
         problems,
@@ -117,10 +169,17 @@ calculated_orbits = np.array(
     )
 )
 
+
+# %% [markdown]
+# ## Write One File Per Orbit And Update The Summary Tables
+#
+# The detailed trajectories are stored separately, while the aggregate orbit
+# data are folded back into the main parquet tables.
+
+# %%
 orbits_labels = np.asarray(orbits["orbit_label"])
 attractors_labels = np.array(orbits["attractor_label"])
-orbits_dir = "outputs/orbits_from_attractors"
-orbits_dir = Path(orbits_dir)
+orbits_dir = working_dir / "orbits_from_attractors"
 orbits_dir.mkdir(parents=True, exist_ok=True)
 
 orbits_from_attractors = {}
@@ -144,12 +203,17 @@ orbits = orbits.drop("Eh").join(
     energy_per_period, on=["orbit_label", "attractor_label"], how="right"
 )
 
-orbits.write_parquet(f"{working_dir}/orbits.parquet")
+orbits.write_parquet(working_dir / "orbits.parquet")
 
 
-unique_orbits = orbits.unique(subset=["orbit_label"], keep="first")["orbit_label", "fd", "detected_subharmonic"]
+unique_orbits = orbits.unique(subset=["orbit_label"], keep="first")[
+    "orbit_label",
+    "fd",
+    "detected_subharmonic",
+]
 orbit_energy = orbits["orbit_label", "Eh"].group_by("orbit_label").mean()
-orbit_energy
 orbit_data = unique_orbits.join(orbit_energy, on="orbit_label", how="inner")
 orbit_data = orbit_data.with_columns((pl.col("Eh") * pl.col("fd")).alias("Ph"))
-orbit_data.write_parquet(f"{working_dir}/orbit_data.parquet")
+orbit_data.write_parquet(working_dir / "orbit_data.parquet")
+
+orbit_data

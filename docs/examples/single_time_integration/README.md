@@ -7,6 +7,16 @@ It runs `kinamax.core.AttractorFinder` on a single `kinamax.problems.H46Problem`
 (one drive frequency, one initial condition), integrates until convergence of the
 subharmonic shooting residuals, and writes a tidy results table to disk.
 
+The executable tutorial version is now the Jupytext notebook
+`integrate_until_convergence_single.py`. It stays as a plain Python file, but it
+is structured into notebook cells so Sphinx can render it as a narrative tutorial.
+
+```{toctree}
+:maxdepth: 1
+
+integrate_until_convergence_single
+```
+
 ## Run
 
 From `docs/examples/single_time_integration/`:

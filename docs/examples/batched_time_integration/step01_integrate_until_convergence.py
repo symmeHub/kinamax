@@ -1,18 +1,32 @@
-"""Time integration tutorial for the H46 problem.
+# ---
+# jupyter:
+#   jupytext:
+#     text_representation:
+#       extension: .py
+#       format_name: percent
+#       format_version: '1.3'
+#       jupytext_version: 1.16.7
+#   kernelspec:
+#     display_name: Python 3
+#     language: python
+#     name: python3
+# ---
 
-This script demonstrates how to:
+# %% [markdown]
+# # Step 1: Integrate A Batched Frequency Sweep Until Convergence
+#
+# This notebook is the batched counterpart of the single-point tutorial.
+#
+# Instead of solving one problem from one initial condition, it builds:
+#
+# - a frequency sweep,
+# - a cloud of initial conditions,
+# - a vectorized attractor search over both axes.
+#
+# The output is a flat table of converged attractor samples saved to
+# `outputs/simulations.parquet`.
 
-1. Construct a driven oscillator (`H46Problem`) with multiple start points and a frequency sweep.
-2. Configure an `AttractorFinder` that integrates trajectories until they converge.
-3. Vectorise the attractor search across both initial conditions and frequency values.
-4. Persist the processed results to disk for downstream analysis.
-
-Each function below contains detailed docstrings so the file can be read top to
-bottom as a self-contained tutorial. The code is intentionally explicit about
-what gets configured and why, mirroring the steps required when adapting the
-workflow to a new problem.
-"""
-
+# %%
 from pathlib import Path
 from jax import numpy as jnp
 import jax
@@ -35,6 +49,20 @@ config.update("jax_enable_x64", True)  # Use double precision for improved accur
 problem_class = H46_EM_Problem
 
 
+# %% [markdown]
+# ## Build A Two-Axis Batched Attractor Finder
+#
+# The scalar routine `AttractorFinder.find_attractors(...)` works on one problem
+# and one initial condition at a time.
+#
+# Here we wrap it twice with `vmap`:
+#
+# - the inner `vmap` scans over the starting states,
+# - the outer `vmap` scans over the frequency-dependent problem instances.
+#
+# The result is then JIT-compiled once with Equinox.
+
+# %%
 def build_batched_finder(find_attractors_fn):
     """Return a JIT-compiled attractor finder that runs on a batch of problems.
 
@@ -98,9 +126,16 @@ def build_batched_finder(find_attractors_fn):
     )
 
 
+# %% [markdown]
+# ## Save Helper
+#
+# The integration stage writes one parquet file that the next notebooks will
+# consume.
+
+# %%
 def save_results(
     data: pl.DataFrame,
-    output_dir: str = "outputs",
+    output_dir: Path,
     filename: str = "simulations.parquet",
 ):
     """Persist processed attractor finder results to disk.
@@ -118,92 +153,94 @@ def save_results(
         the downstream notebooks can discover the expected artifact.
     """
 
-    target_dir = Path(output_dir)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    data.write_parquet(str(target_dir / filename))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    data.write_parquet(str(output_dir / filename))
 
 
-def main():
-    """Execute the full integration workflow for the tutorial example.
+# %% [markdown]
+# ## Choose The Sweep And Finder Parameters
+#
+# The frequency axis and the attractor-finder settings are broadcast together.
+# Every frequency point gets its own problem parameters and matching
+# `AttractorFinderConfig`.
 
-    The steps are deliberately spelled out to emphasise how each component fits
-    together:
+# %%
+example_dir = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
+output_dir = example_dir / "outputs"
 
-    1. Define a single-point frequency sweep and populate the attractor finder
-       configuration with tolerances and integration spacing.
-    2. Instantiate the `Tsit5` solver and `PIDController` that control the adaptive
-       time stepping during integration.
-    3. Sample a grid of random initial conditions inside a bounding box scaled by
-       the problem's characteristic width (`xw`) so that we explore a range of
-       possible basins.
-    4. Call :func:`build_batched_finder` to obtain a vectorised attractor finder,
-       run it, and post-process the results into a tidy table.
-    5. Save the tidy table to ``docs/examples/time_integration/outputs`` so the
-       companion tutorial in the documentation can visualise the attractors.
-    """
+fd = jnp.linspace(20, 50.0, 11)
+finder_config = AttractorFinderConfig(
+    convergence_tol=1.0e-10,
+    target_frequency=fd,
+    init_time=0.0,
+    init_time_step=1.0e-3,
+    subharmonic_factor=10,
+)
+solver = Tsit5()
+controller = PIDController(rtol=1e-8, atol=1e-9)
+target_subharmonics = np.array([1, 2, 3, 5], dtype=int)
+attractor_finder = AttractorFinder.Params(
+    residuals_per_period=20,
+    targetted_subharmonics=target_subharmonics,
+    max_periods=2000,
+    controller=controller,
+    solver=solver,
+)
 
-    # Sweep the drive frequency. Each entry defines one problem/configuration pair.
-    fd = jnp.linspace(20, 50.0, 11)  # Frequency sweep (Hz)
-    # The finder configuration is broadcast over the same frequency axis.
-    finder_config = AttractorFinderConfig(
-        convergence_tol=1.0e-10,
-        target_frequency=fd,
-        init_time=0.0,
-        init_time_step=1.0e-3,
-        subharmonic_factor=10,
+
+# %% [markdown]
+# ## Generate The Batched Problems And Initial Conditions
+#
+# The electromechanical model has five states. Each row of `init_conditions`
+# defines one starting point, and each column matches one state component of the
+# model.
+
+# %%
+problem = problem_class(fd=fd, Ad=2.5)
+key = jax.random.PRNGKey(758493)
+Nstart = 20
+init_conditions = (
+    (jax.random.uniform(key, shape=(Nstart, 5)) - 0.5)
+    * 2.0
+    * jnp.array([5.0 * problem.xw, 10.0 * problem.xw * problem.w0, 1.0, 0.0, 0.0])
+)
+
+
+# %% [markdown]
+# ## Run The Batched Attractor Search
+#
+# The returned arrays keep the full batched structure:
+# frequency point, initial condition, and attractor sample along the detected
+# orbit.
+
+# %%
+batched_find = build_batched_finder(
+    lambda problem, x0, cfg: AttractorFinder.find_attractors(
+        attractor_finder, problem, x0, cfg
     )
-    solver = Tsit5()
-    controller = PIDController(rtol=1e-8, atol=1e-9)
-    # Search for the fundamental and several subharmonic responses.
-    target_subharmonics = np.array([1, 2, 3, 5], dtype=int)
-    attractor_finder = AttractorFinder.Params(
-        residuals_per_period=20,
-        targetted_subharmonics=target_subharmonics,
-        max_periods=2000,
-        controller=controller,
-        solver=solver,
-    )
-
-    # Build the whole frequency sweep as one batched problem object. Because the
-    # fields are arrays, JAX can vectorise over them without a Python loop.
-    problem = problem_class(fd=fd, Ad=2.5)
-    key = jax.random.PRNGKey(758493)
-    Nstart = 20
-    # Sample a cloud of initial conditions. Each row is one starting point in the
-    # full five-dimensional state space of the electromechanical model.
-    init_conditions = (
-        (jax.random.uniform(key, shape=(Nstart, 5)) - 0.5)
-        * 2.0
-        * jnp.array([5.0 * problem.xw, 10.0 * problem.xw * problem.w0, 1.0, 0.0, 0.0])
-    )
-
-    # Compose the nested vmaps/JIT and run the attractor search on every
-    # (frequency, initial condition) combination.
-    batched_find = build_batched_finder(
-        lambda problem, x0, cfg: AttractorFinder.find_attractors(
-            attractor_finder, problem, x0, cfg
-        )
-    )
-    problems, finder_configs, vmaped_init, solutions = batched_find(
-        problem,
-        init_conditions,
-        finder_config,
-    )
-
-    # Flatten the batched PyTree outputs into one tidy table where each row
-    # corresponds to one attractor sample and carries its metadata.
-    processed = post_process_attractor_finder_results(
-        problem_class=problem_class,
-        problems=problems,
-        finder_configs=finder_configs,
-        init_conditions=vmaped_init,
-        solutions=solutions,
-        target_subharmonics=target_subharmonics,
-        solution_state_labels=[lab + "a" for lab in problem_class.state_vector_labels],
-    )
-    # Persist the processed simulations for the next example steps.
-    save_results(processed)
+)
+problems, finder_configs, vmaped_init, solutions = batched_find(
+    problem,
+    init_conditions,
+    finder_config,
+)
 
 
-if __name__ == "__main__":
-    main()
+# %% [markdown]
+# ## Flatten And Save The Result
+#
+# `post_process_attractor_finder_results(...)` turns the batched PyTree into one
+# tidy table that downstream steps can consume directly.
+
+# %%
+processed = post_process_attractor_finder_results(
+    problem_class=problem_class,
+    problems=problems,
+    finder_configs=finder_configs,
+    init_conditions=vmaped_init,
+    solutions=solutions,
+    target_subharmonics=target_subharmonics,
+    solution_state_labels=[lab + "a" for lab in problem_class.state_vector_labels],
+)
+save_results(processed, output_dir=output_dir)
+processed
