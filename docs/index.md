@@ -16,10 +16,10 @@ examples/index
 
 ## What is in the package
 
-- `kinamax.core` contains the attractor search, clustering, and post-processing
-  utilities.
-- `kinamax.problems` contains data-oriented problem definitions such as
-  `H46Problem`.
+- `kinamax.integration.core` contains the attractor search, clustering, and
+  post-processing utilities.
+- `kinamax.integration.models` contains data-oriented time-integration models
+  such as `H46Problem`.
 - `kinamax.hbm` contains harmonic-balance helpers for Fourier coefficient
   manipulations.
 

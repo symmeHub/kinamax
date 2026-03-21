@@ -9,9 +9,9 @@ kinamax is a JAX/Diffrax powered toolkit for analyzing periodic and subharmonic 
 
 ### Core Components
 
-- Problem model: `H46Problem` defining the ODE right‑hand side and state weighting for normalization.
-- Orbit search: `OrbitFinder` with Diffrax `Tsit5` and a PID stepsize controller; detects subharmonics across candidate periods.
-- Results container: `OrbitFinderSolution` with helpers to flatten results to tables.
+- Problem model: `kinamax.integration.models.H46Problem` defining the ODE right‑hand side and state weighting for normalization.
+- Orbit search: `kinamax.integration.core.AttractorFinder` with Diffrax `Tsit5` and a PID stepsize controller; detects subharmonics across candidate periods.
+- Results container: `kinamax.integration.core.AttractorFinderSolution` with helpers to flatten results to tables.
 - Post‑processing: `cluster_points` (DBSCAN/Agglomerative/cuML) and `detect_attractors_orbits` to turn trajectories into attractor and orbit assignments.
 
 ### Examples

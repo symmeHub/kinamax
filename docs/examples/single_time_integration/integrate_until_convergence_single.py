@@ -21,7 +21,7 @@
 # It mirrors the batched example, but restricts the computation to one problem
 # instance and one initial condition:
 #
-# - one driven oscillator, `kinamax.problems.H46Problem`
+# - one driven oscillator, `kinamax.integration.models.H46Problem`
 # - one drive frequency, `fd`
 # - one initial state, `X0`
 #
@@ -54,12 +54,12 @@ import numpy as np
 import polars as pl
 from diffrax import PIDController, Tsit5
 
-from kinamax.core import (
+from kinamax.integration.core import (
     AttractorFinder,
     AttractorFinderConfig,
     post_process_attractor_finder_results,
 )
-from kinamax.problems import H46Problem
+from kinamax.integration.models import H46Problem
 
 config.update("jax_enable_x64", True)  # Use double precision for improved accuracy
 

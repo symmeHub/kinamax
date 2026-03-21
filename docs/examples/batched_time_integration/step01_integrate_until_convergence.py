@@ -35,14 +35,12 @@ from diffrax import Tsit5, PIDController
 import numpy as np
 import polars as pl
 import equinox as eqx
-from kinamax.core import (
+from kinamax.integration.core import (
     AttractorFinder,
     AttractorFinderConfig,
     post_process_attractor_finder_results,
 )
-
-# from kinamax.problems import H46Problem
-from models import H46_EM_Problem
+from kinamax.integration.models import H46_EM_Problem
 
 config.update("jax_enable_x64", True)  # Use double precision for improved accuracy
 

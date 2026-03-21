@@ -1,7 +1,7 @@
 import numpy as np
 import jax.numpy as jnp
 
-from kinamax.problems import H46Problem
+from kinamax.integration.models import H46Problem
 
 
 def test_h46_params_build_namedtuple_data():

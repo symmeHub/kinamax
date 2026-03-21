@@ -3,7 +3,7 @@
 This example is a minimal, **non-batched** version of the workflow shown in
 `docs/examples/batched_time_integration/`.
 
-It runs `kinamax.core.AttractorFinder` on a single `kinamax.problems.H46Problem`
+It runs `kinamax.integration.core.AttractorFinder` on a single `kinamax.integration.models.H46Problem`
 (one drive frequency, one initial condition), integrates until convergence of the
 subharmonic shooting residuals, and writes a tidy results table to disk.
 

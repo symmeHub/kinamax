@@ -1,7 +1,7 @@
-# `kinamax.core`
+# `kinamax.integration.core`
 
 ```{eval-rst}
-.. automodule:: kinamax.core
+.. automodule:: kinamax.integration.core
    :members:
    :undoc-members:
    :show-inheritance:

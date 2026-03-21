@@ -2,7 +2,7 @@
 
 This example shows how to use `kinamax` to run **many time integrations in parallel** (batched over initial conditions and a frequency sweep), detect steady-state **orbits/attractors**, and then reconstruct representative **limit cycles** for post-processing and plotting.
 
-The dynamical system used here is `H46_EM_Problem` (`models.py`), a driven nonlinear oscillator with an electromechanical (EM) coupling term. The workflow is generic: you can swap in another `Container`-style problem as long as it provides `rhs()` and labels.
+The dynamical system used here is `kinamax.integration.models.H46_EM_Problem`, a driven nonlinear oscillator with an electromechanical (EM) coupling term. The workflow is generic: you can swap in another `Container`-style problem as long as it provides `rhs()` and labels.
 
 ```{toctree}
 :maxdepth: 1
@@ -38,7 +38,7 @@ This is the “batched time integration” part of the example.
 
 ## Step 2 — Detect orbits
 
-The second notebook calls `kinamax.core.detect_orbits`, which groups converged attractors into orbit labels and produces:
+The second notebook calls `kinamax.integration.core.detect_orbits`, which groups converged attractors into orbit labels and produces:
 
 - `outputs/orbits.parquet`: attractor/orbit metadata and representative attractor states
 - `outputs/sim_orbit.parquet`: mapping between simulation runs and detected orbits

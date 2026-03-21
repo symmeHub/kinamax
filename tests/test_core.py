@@ -8,7 +8,7 @@ import polars as pl
 import pytest
 from jax.tree_util import register_dataclass
 
-from kinamax.core import (
+from kinamax.integration.core import (
     AttractorFinder,
     AttractorFinderConfig,
     AttractorFinderSolution,

@@ -34,7 +34,7 @@ import numpy as np
 import polars as pl
 from diffrax import ODETerm, PIDController, SaveAt, Tsit5, diffeqsolve
 
-from models import H46_EM_Problem
+from kinamax.integration.models import H46_EM_Problem
 
 problem_class = H46_EM_Problem
 

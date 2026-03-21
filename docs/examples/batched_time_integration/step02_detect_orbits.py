@@ -28,8 +28,8 @@ from pathlib import Path
 
 import polars as pl
 
-from kinamax.core import detect_orbits
-from models import H46_EM_Problem
+from kinamax.integration.core import detect_orbits
+from kinamax.integration.models import H46_EM_Problem
 
 problem_class = H46_EM_Problem
 

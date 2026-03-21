@@ -31,7 +31,6 @@ exclude_patterns = [
     "Thumbs.db",
     ".DS_Store",
     "conf.py",
-    "examples/batched_time_integration/models.py",
     "examples/batched_time_integration/run_steps_1_to_3.sh",
     "examples/batched_time_integration/wip/**",
     "examples/batched_time_integration/outputs/**",
