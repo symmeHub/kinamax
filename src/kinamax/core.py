@@ -1,66 +1,68 @@
+"""Core orbit-finding, clustering, and result post-processing utilities."""
+
+from __future__ import annotations
+
+from collections import defaultdict, namedtuple
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from typing import Any, NamedTuple, TypeVar
+
 import jax
 import jax.numpy as jnp
 import numpy as np
+import numpy.typing as npt
 import polars as pl
-from dataclasses import dataclass, field
-from jax.tree_util import register_dataclass
+from diffrax import ODETerm, PIDController, SaveAt, Tsit5, diffeqsolve
 from jax import lax, vmap
-from diffrax import diffeqsolve, ODETerm, SaveAt, Tsit5
-from diffrax import PIDController
-from typing import NamedTuple, ClassVar
-from collections import namedtuple, defaultdict
+from jax.tree_util import register_dataclass
+from jax.typing import ArrayLike
 
 try:
     import cuml
 except ImportError:
-    pass
+    cuml = None
 from sklearn.cluster import DBSCAN, AgglomerativeClustering
+
+__all__ = [
+    "Container",
+    "AttractorFinderConfig",
+    "convert_subharmonics_flags",
+    "AttractorFinderSolution",
+    "AttractorFinder",
+    "post_process_attractor_finder_results",
+    "cluster_points",
+    "detect_orbits",
+]
+
+P = TypeVar("P")
 
 
 @dataclass
 class Container:
-    """
-    Container class for holding various parameters.
-    """
+    """Base container exposing NumPy/Polars export helpers for array-like fields."""
 
-    def as_dict(self, flatten=True):
-        """
-        Converts the problem to a dictionary.
-        Returns:
-            dict: Dictionary representation of the problem.
-        """
-        raw_dic = self.__dict__
-        dic = {}
-        for key, value in raw_dic.items():
-            if flatten:
-                v = value.flatten()
-            else:
-                v = value
-            dic[key] = np.array(v)
+    def as_dict(self, flatten: bool = True) -> dict[str, np.ndarray]:
+        """Convert container fields to a NumPy-backed dictionary."""
+        dic: dict[str, np.ndarray] = {}
+        for key, value in self.__dict__.items():
+            array = np.asarray(value)
+            dic[key] = array.flatten() if flatten else array
         return dic
 
-    def as_polars(self, repeat=0):
-        """
-        Converts the problem to a Polars DataFrame.
-        Returns:
-            pl.DataFrame: Polars DataFrame representation of the problem.
-        """
+    def as_polars(self, repeat: int = 0) -> pl.DataFrame:
+        """Convert the container to a Polars DataFrame."""
         dic = self.as_dict()
-        # keys = list(dic.keys())
-        # s = len(dic[keys[0]])
-        # label = np.arange(s)
-        # label_name = self.label_col if hasattr(self, "label_col") else "label"
-        # dic[label_name] = label
         if repeat > 0:
             for key, value in dic.items():
                 dic[key] = value.repeat(repeat)
-        df = pl.DataFrame(dic)
-        return df
+        return pl.DataFrame(dic)
 
 
 @register_dataclass
 @dataclass
 class AttractorFinderConfig(Container):
+    """Configuration values driving the shooting-based attractor search."""
+
     init_time: jax.Array = field(default_factory=lambda: jnp.array(0.0, dtype=float))
     init_time_step: jax.Array = field(
         default_factory=lambda: jnp.array(1.0e-3, dtype=float)
@@ -70,27 +72,32 @@ class AttractorFinderConfig(Container):
     )
     target_frequency: float = 50.0
     subharmonic_factor: float = 10.0
-    # label_col: ClassVar = "config_id"
 
+def convert_subharmonics_flags(
+    subharmonics_flags: ArrayLike,
+    final_flags: ArrayLike,
+    targetted_subharmonics: ArrayLike,
+) -> npt.NDArray[np.int32]:
+    """Collapse per-target boolean flags into detected subharmonic orders.
 
-def convert_subharmonics_flags(subharmonics_flags, final_flags, targetted_subharmonics):
+    For rows flagged as converged (`final_flags == 1`), the first active entry in
+    `subharmonics_flags` selects the matching order from `targetted_subharmonics`.
+    Rows without convergence keep value `0`.
     """
-    Convert the detected subharmonics into a boolean array.
-    """
-    detected_subharmonics = np.zeros(final_flags.shape, dtype=np.int32)
-    for i in range(len(subharmonics_flags)):
-        sh = subharmonics_flags[i]
-        if final_flags[i] == 1:
-            detected_subharmonics[i] = targetted_subharmonics[i, sh == 1][0]
+    subharmonics_flags_array = np.asarray(subharmonics_flags)
+    final_flags_array = np.asarray(final_flags)
+    targetted_subharmonics_array = np.asarray(targetted_subharmonics)
+    detected_subharmonics = np.zeros(final_flags_array.shape, dtype=np.int32)
+    for i, sh in enumerate(subharmonics_flags_array):
+        if final_flags_array[i] == 1:
+            detected_subharmonics[i] = targetted_subharmonics_array[i, sh == 1][0]
     return detected_subharmonics
 
 
 @register_dataclass
 @dataclass
 class AttractorFinderSolution(Container):
-    """
-    Solution of the orbit finder.
-    """
+    """Structured output produced by :meth:`AttractorFinder.find_attractors`."""
 
     attractors: jax.Array
     detected_subharmonic: jax.Array
@@ -102,14 +109,11 @@ class AttractorFinderSolution(Container):
     simulated_iterations: jax.Array
     converged: jax.Array
 
-    def as_dict(self, state_vector_labels=None):
-        """
-        Converts the problem to a dictionary.
-        Returns:
-            dict: Dictionary representation of the problem.
-        """
-        raw_dic = self.__dict__
-        dic = {}
+    def as_dict(
+        self, state_vector_labels: Sequence[str] | None = None
+    ) -> dict[str, np.ndarray]:
+        """Flatten attractor-finder outputs to a tabular NumPy dictionary."""
+        dic: dict[str, np.ndarray] = {}
         s = self.detected_subharmonic.shape
         orbit = np.arange(np.prod(s[:-1]))[..., None].repeat(s[-1]).flatten()
         attractor = (
@@ -117,113 +121,65 @@ class AttractorFinderSolution(Container):
         )
         dic["sim_label"] = orbit
         dic["attractor_label"] = attractor
-        for key, value in raw_dic.items():
-            value = np.array(value)
+        for key, value in self.__dict__.items():
+            value = np.asarray(value)
             if key == "attractors":
-                Nv = value.shape[-1]
-                value = value.reshape(-1, Nv)
+                state_dim = value.shape[-1]
+                value = value.reshape(-1, state_dim)
                 if state_vector_labels is not None:
-                    for i in range(Nv):
+                    for i in range(state_dim):
                         dic[state_vector_labels[i]] = value[:, i]
                 else:
-                    for i in range(Nv):
+                    for i in range(state_dim):
                         dic[f"Xa_{i}"] = value[:, i]
             else:
                 dic[key] = value.flatten()
         return dic
 
-    def get_subharmonics(self):
-        """
-        Returns the detected subharmonics.
-        Returns:
-            jnp.ndarray: Detected subharmonics.
-        """
-        subharmonics_flags = self.subharmonics_flags
-        final_flags = self.final_flags
-        targetted_subharmonics = self.targetted_subharmonics
-        Nts = targetted_subharmonics.shape[-1]
-        subharmonics_flags = subharmonics_flags.reshape(-1, Nts)
-        final_flags = final_flags.flatten()
-        targetted_subharmonics = targetted_subharmonics.reshape(-1, Nts)
-        return convert_subharmonics_flags(
-            subharmonics_flags, final_flags, targetted_subharmonics
-        )
+    def get_subharmonics(self) -> np.ndarray:
+        """Return the detected subharmonic order for each flattened attractor row."""
+        return np.asarray(self.detected_subharmonic).flatten()
 
-    def as_polars(self, *args, **kwargs):
-        """
-        Converts the problem to a Polars DataFrame.
-        Returns:
-            pl.DataFrame: Polars DataFrame representation of the problem.
-        """
-        dic = self.as_dict(*args, **kwargs)
-        # orbit = dic.pop("orbit_label", None)
-
-        df = pl.DataFrame(dic)
-        # df.insert_column(0, pl.Series("sim_label", orbit))
-        return df
+    def as_polars(
+        self, state_vector_labels: Sequence[str] | None = None
+    ) -> pl.DataFrame:
+        """Convert the solution object to a Polars DataFrame."""
+        return pl.DataFrame(self.as_dict(state_vector_labels=state_vector_labels))
 
 
 class AttractorFinder(NamedTuple):
-    """
-    Container class for finding orbits in a given ODE problem.
-    """
+    """Shooting-based attractor finder for periodically forced ODE systems."""
 
-    residuals_per_period: jax.Array = np.array(10, int)
-    targetted_subharmonics: jax.Array = np.array([1, 3, 5], int)
+    residuals_per_period: int = 10
+    targetted_subharmonics: npt.NDArray[np.int_] = np.array([1, 3, 5], dtype=int)
     max_periods: int = 1000
     controller: PIDController = PIDController(rtol=1e-7, atol=1e-9)
     solver: Tsit5 = Tsit5()
 
-    def get_max_subharmonic(self):
-        """
-        Returns the maximum subharmonic.
-        Returns:
-            int: Maximum subharmonic.
-        """
-        return np.max(self.targetted_subharmonics)
+    def get_max_subharmonic(self) -> int:
+        """Return the largest targeted subharmonic order."""
+        return int(np.max(np.asarray(self.targetted_subharmonics)))
 
-    def get_time_steps_number(self):
-        """
-        Returns the number of time steps.
-        Returns:
-            int: Number of time steps.
-        """
+    def get_time_steps_number(self) -> int:
+        """Return the number of saved samples for one shooting window."""
         max_subharmonic = self.get_max_subharmonic()
-        return 2 * max_subharmonic * self.residuals_per_period + 1
+        return 2 * max_subharmonic * int(self.residuals_per_period) + 1
 
-    def get_max_shooting_iterations(self):
-        """
-        Returns the maximum number of shooting iterations.
-        Returns:
-            int: Maximum number of shooting iterations.
-        """
+    def get_max_shooting_iterations(self) -> int:
+        """Return the maximum number of shooting windows to integrate."""
         max_subharmonic = self.get_max_subharmonic()
         return self.max_periods // (2 * max_subharmonic)
 
     def find_attractors(
         self,
-        problem: NamedTuple,
+        problem: P,
         init_conditions: jax.Array,
         finder_config: AttractorFinderConfig,
-    ):
-        """
-        Find orbits for the given problem.
-        Args:
-            problem: The problem instance.
-            term (ODETerm): The ODE term.
-            solver (Tsit5): The solver.
-            controller (PIDController): The controller.
-            init_conditions (jax.Array): Initial conditions for the system.
-            target_frequency (float): Target frequency.
-            finder_config (AttractorFinderConfig): Configuration for finding orbits.
-        Returns:
-            jax.Array: Found orbits.
-        """
+    ) -> tuple[P, AttractorFinderConfig, jax.Array, AttractorFinderSolution]:
+        """Integrate until convergence and then sample the attractor over one orbit."""
 
         def body_fun(carry):
-            """
-            Body of the while loop that integrates the ODE and checks for convergence.
-            """
+            """Advance the shooting window and update convergence diagnostics."""
 
             start_time = carry.start_time
             end_time = carry.end_time
@@ -272,10 +228,7 @@ class AttractorFinder(NamedTuple):
             return carry
 
         def condition_fun(carry):
-            """
-            Stop condition for the while loop. The loop continues until convergence is achieved
-            or the maximum number of iterations is reached.
-            """
+            """Continue until convergence is reached or iteration budget is exhausted."""
 
             flag = carry.flag
             return jnp.all(flag == 0)
@@ -296,7 +249,7 @@ class AttractorFinder(NamedTuple):
         )
         solver = self.solver
         controller = self.controller
-        residuals_per_period = self.residuals_per_period
+        residuals_per_period = int(self.residuals_per_period)
         targetted_subharmonics = self.targetted_subharmonics
         target_frequency = finder_config.target_frequency
         max_subharmonic = self.get_max_subharmonic()
@@ -350,7 +303,7 @@ class AttractorFinder(NamedTuple):
             detected_subharmonic == targetted_subharmonics, residuals, jnp.inf
         ).min()
         min_residual = residuals.min()
-        # CALCULATE ATTRACTORS
+        # Sample the converged trajectory once per target period to expose attractors.
         term = ODETerm(problem.rhs)
         tg = jnp.arange(1, max_subharmonic + 1)
         t0 = finder_config.init_time
@@ -389,10 +342,10 @@ class AttractorFinder(NamedTuple):
         return problem, finder_config, init_conditions, solution
 
     @staticmethod
-    def calculate_subharmonic_atomic_residual(pos, args):
-        """
-        Calculates the shooting residual for a given subharmonic and a given time step.
-        """
+    def calculate_subharmonic_atomic_residual(
+        pos: int, args: tuple[ArrayLike, int, ArrayLike, ArrayLike]
+    ) -> tuple[ArrayLike, int, ArrayLike, ArrayLike]:
+        """Accumulate one term of the weighted shooting residual."""
         norm, offset, X, state_weights = args
         residual = (X[-pos - offset - 1] - X[-pos - 1]) * state_weights
         norm += (residual * residual).sum()
@@ -400,11 +353,12 @@ class AttractorFinder(NamedTuple):
 
     @staticmethod
     def calculate_subharmonic_residual(
-        subharmonic, X, residuals_per_period, state_weights
-    ):
-        """
-        Calculates the shooting residual for a given subharmonic and at all time steps.
-        """
+        subharmonic: int,
+        X: ArrayLike,
+        residuals_per_period: int,
+        state_weights: ArrayLike,
+    ) -> jax.Array:
+        """Calculate the weighted shooting residual for one candidate subharmonic."""
         calculate_residuals = AttractorFinder.calculate_subharmonic_atomic_residual
         offset = residuals_per_period * subharmonic
         args_in = (0.0, offset, X, state_weights)
@@ -413,26 +367,23 @@ class AttractorFinder(NamedTuple):
 
     @staticmethod
     def integrate_and_check_convergence(
-        init_conditions,
-        start_time,
-        end_time,
-        steps_number,
-        problem,
-        solver,
-        controller,
-        init_time_step,
-        targetted_subharmonics,
-        residuals_per_period,
-    ):
-        """
-        Integrate the ODE between t0 and t1, and check the convergence of the subharmonic residuals.
-        """
+        init_conditions: ArrayLike,
+        start_time: ArrayLike,
+        end_time: ArrayLike,
+        steps_number: int,
+        problem: Any,
+        solver: Tsit5,
+        controller: PIDController,
+        init_time_step: ArrayLike,
+        targetted_subharmonics: ArrayLike,
+        residuals_per_period: int,
+    ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+        """Integrate one shooting window and evaluate residuals for each target."""
         t0 = start_time
         t1 = end_time
         dt0 = init_time_step
         X0 = init_conditions
         term = ODETerm(problem.rhs)
-        # Vectorized version of calculate_subharmonic_residual
         batched_calculate_subharmonic_residual = vmap(
             AttractorFinder.calculate_subharmonic_residual,
             in_axes=(0, None, None, None),
@@ -466,20 +417,25 @@ class AttractorFinder(NamedTuple):
 
 
 def post_process_attractor_finder_results(
-    problem_class,
-    problems,
-    finder_configs,
-    init_conditions,
-    solutions,
-    target_subharmonics,
-    solution_state_labels,
-):
-    """Flatten batched results and balance rows per subharmonic."""
+    problem_class: type[Any],
+    problems: Container,
+    finder_configs: Container,
+    init_conditions: ArrayLike,
+    solutions: AttractorFinderSolution,
+    target_subharmonics: ArrayLike,
+    solution_state_labels: Sequence[str],
+) -> pl.DataFrame:
+    """Flatten batched attractor-finder outputs to one balanced result table.
 
-    state_vector_labels = problem_class.state_vector_labels
+    The returned table contains one row per retained attractor sample. For a
+    detected subharmonic `Hk`, only the first `k` attractor rows are kept per
+    simulation so different simulations can be compared with a consistent layout.
+    """
+
+    state_vector_labels = list(problem_class.state_vector_labels)
     state_space_dim = len(state_vector_labels)
     flattened_init = np.array(init_conditions).reshape(-1, state_space_dim)
-    max_attractors = target_subharmonics.max()
+    max_attractors = int(np.max(np.asarray(target_subharmonics)))
 
     df_init_conditions = pl.DataFrame(
         {
@@ -509,78 +465,58 @@ def post_process_attractor_finder_results(
     return pl.concat(balanced, how="vertical").sort(["sim_label", "attractor_label"])
 
 
-def cluster_points(points, weights, distance_threshold=0.01, method="dbscan"):
-    """
-    Cluster points in a weighted feature space and return cluster centroids.
+def cluster_points(
+    points: ArrayLike,
+    weights: ArrayLike,
+    distance_threshold: float = 0.01,
+    method: str = "dbscan",
+) -> tuple[int, np.ndarray, np.ndarray]:
+    """Cluster weighted points and return labels with centroids in original space."""
+    points_array = np.asarray(points)
+    weights_array = np.asarray(weights)
+    supported_methods = {"dbscan", "dbscan_cuml", "agglomerative-clustering"}
+    if method not in supported_methods:
+        raise ValueError(
+            f"Unknown clustering method {method!r}. Expected one of {supported_methods}."
+        )
 
-    The input points are scaled elementwise by ``weights`` before clustering,
-    but centroids are computed in the original (unweighted) point space.
-
-    Args:
-        points (array-like): Array of shape ``(n_points, n_dims)`` containing the
-            points to cluster.
-        weights (array-like): Per-dimension scaling factors broadcastable to
-            ``points`` (typically shape ``(n_dims,)``).
-        distance_threshold (float, optional): Clustering scale parameter.
-            - For ``method="dbscan"`` / ``"dbscan_cuml"``: used as DBSCAN ``eps``.
-            - For ``method="agglomerative-clustering"``: used as
-              ``AgglomerativeClustering(distance_threshold=...)`` with
-              ``n_clusters=None`` and ``linkage="ward"``.
-        method (str, optional): Clustering backend. One of
-            ``{"dbscan", "dbscan_cuml", "agglomerative-clustering"}``.
-
-    Returns:
-        tuple:
-            - nclusters (int): Number of unique cluster labels.
-            - labels (np.ndarray): Array of shape ``(n_points,)`` with the cluster
-              label for each point.
-            - centroids (np.ndarray): Array of shape ``(nclusters, n_dims)`` with
-              the mean of points belonging to each cluster label.
-
-    Notes:
-        - DBSCAN is configured with ``min_samples=1``, so points are not treated
-          as noise (i.e. labels are expected to be ``0..nclusters-1``).
-        - ``method="dbscan_cuml"`` requires ``cuml`` to be installed and importable.
-    """
-    if len(points) > 1:
-        X = points * weights  # Array CPU
-        if method == "agglomerative-clustering":
-            db = AgglomerativeClustering(
-                distance_threshold=distance_threshold, n_clusters=None, linkage="ward"
-            ).fit(X)
-        if method == "dbscan":
-            db = DBSCAN(eps=distance_threshold, min_samples=1).fit(
-                X
-            )  # applique la methode fit() de l'objet DBSAN de scikit-learn; fit(X) effectue
-            # le clustering DBSCAN a partir des caracteristiques ou de la matrice de distance
-        if method == "dbscan_cuml":
-            db = cuml.DBSCAN(eps=distance_threshold, min_samples=1).fit(
-                X
-            )  # CUDA version
-        labels = (
-            db.labels_
-        )  # etiquettes des clusters pour chaque point de l'ensemble de donnees donne a fit(X). etiquette -1 si bruite.
-        nclusters = np.unique(labels).size
-        centroids = []
-        for c in range(nclusters):
-            centroids.append(points[labels == c].mean(axis=0))
-        centroids = np.array(centroids)
-        return nclusters, labels, centroids
-
-    else:
-        centroids = points.copy()
+    if len(points_array) <= 1:
+        centroids = points_array.copy()
         return 1, np.zeros(1, dtype=np.int32), centroids
+
+    scaled_points = points_array * weights_array
+    if method == "agglomerative-clustering":
+        db = AgglomerativeClustering(
+            distance_threshold=distance_threshold,
+            n_clusters=None,
+            linkage="ward",
+        ).fit(scaled_points)
+    elif method == "dbscan":
+        db = DBSCAN(eps=distance_threshold, min_samples=1).fit(scaled_points)
+    else:
+        if cuml is None:
+            raise ImportError(
+                "method='dbscan_cuml' requires cuML to be installed and importable."
+            )
+        db = cuml.DBSCAN(eps=distance_threshold, min_samples=1).fit(scaled_points)
+
+    labels = np.asarray(db.labels_, dtype=np.int32)
+    nclusters = np.unique(labels).size
+    centroids = np.array(
+        [points_array[labels == cluster_id].mean(axis=0) for cluster_id in range(nclusters)]
+    )
+    return nclusters, labels, centroids
 
 
 def detect_orbits(
-    problem_class: NamedTuple,
+    problem_class: type[Any],
     simulations: pl.DataFrame,
-    ode_params_labels: list,
-    attractor_state_vec_labels: list,
-    state_vec_labels: list,
+    ode_params_labels: Sequence[str],
+    attractor_state_vec_labels: Sequence[str],
+    state_vec_labels: Sequence[str],
     distance_threshold: float = 0.01,
     clustering_method: str = "dbscan",
-):
+) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Cluster attractor samples per configuration and map them to orbit IDs.
 
     Workflow
@@ -602,6 +538,9 @@ def detect_orbits(
         return tuple(np.roll(sequence, -rotation))
 
     next_attractor_label = 0
+    ode_params_labels = list(ode_params_labels)
+    attractor_state_vec_labels = list(attractor_state_vec_labels)
+    state_vec_labels = list(state_vec_labels)
     group_labels = ode_params_labels + ["detected_subharmonic", "target_frequency"]
     attractor_columns = (
         state_vec_labels
@@ -619,7 +558,7 @@ def detect_orbits(
 
     for keys, group in simulations.group_by(group_labels):
         params = dict(zip(group_labels, keys))
-        sh = params["detected_subharmonic"]
+        sh = int(params["detected_subharmonic"])
         if sh <= 0 or group.height == 0:
             continue
 
@@ -682,6 +621,6 @@ def detect_orbits(
                 orbit_id_lookup[tuple_] for tuple_ in sim_to_attractor_tuple.values()
             ],
         }
-    )
-    attractors_df = pl.DataFrame(attractors)
+    ).sort("sim_label")
+    attractors_df = pl.DataFrame(attractors).sort("attractor_label")
     return attractors_df, sim_orbit_df
