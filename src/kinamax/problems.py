@@ -1,59 +1,51 @@
-from dataclasses import dataclass
-from typing import ClassVar
+"""Problem definitions expressed as data containers plus standalone operators."""
+
+from __future__ import annotations
+
+from typing import Any, NamedTuple
+
 import jax
 import jax.numpy as jnp
-from jax.tree_util import register_dataclass
-from kinamax.core import Container
+from jax.typing import ArrayLike
 
-@register_dataclass
-@dataclass
-class H46Problem(Container):
-    """
-    H46 Problem
-    """
+__all__ = ["H46Problem"]
 
-    xw: jax.Array = 0.5e-3
-    fd: jax.Array = 50.0
-    w0: jax.Array = 121.0
-    Q: jax.Array = 87.0
-    Ad: jax.Array = 2.5
 
-    state_vector_labels: ClassVar = ["x", "dotx", "Eh"]
-    params_labels: ClassVar = ["xw", "w0", "Ad", "Q", "fd"]
-    # label_col: ClassVar = "problem_id"
+class H46Problem:
+    """Namespace holding the H46 problem data layouts and static helpers."""
 
-    def state_weights(self):
-        """
-        Returns the state weights for the system.
-        Returns:
-            jnp.ndarray: State weights.
-        """
-        xw = self.xw
-        w0 = self.w0
-        return jnp.array([1.0 / xw, 1.0 / (w0 * xw), 0.0])
+    state_vector_labels: tuple[str, ...] = ("x", "dotx", "Eh")
+    params_labels: tuple[str, ...] = ("xw", "w0", "Ad", "Q", "fd")
 
-    def rhs(self, t, X, args=None):
-        """
-        Right-hand side of the ODE.
-        Args:
-            t (float): Time.
-            X (jnp.ndarray): State vector.
-            args (tuple, optional): Additional arguments. Defaults to None.
-        Returns:
-            jnp.ndarray: Derivative of the state vector.
-        """
-        xw = self.xw
-        w0 = self.w0
-        Q = self.Q
-        fd = self.fd
-        Ad = self.Ad
-        x, dotx, Eh = X
-        wd = 2.0 * jnp.pi * fd
+    class Params(NamedTuple):
+        """Physical parameters of the driven H46 oscillator."""
+
+        xw: jax.Array = jnp.array(0.5e-3)
+        fd: jax.Array = jnp.array(50.0)
+        w0: jax.Array = jnp.array(121.0)
+        Q: jax.Array = jnp.array(87.0)
+        Ad: jax.Array = jnp.array(2.5)
+
+    @staticmethod
+    def state_weights(problem: "H46Problem.Params") -> jax.Array:
+        """Return per-state scaling weights aligned with ``[x, dotx, Eh]``."""
+        return jnp.array([1.0 / problem.xw, 1.0 / (problem.w0 * problem.xw), 0.0])
+
+    @staticmethod
+    def rhs(
+        problem: "H46Problem.Params",
+        t: ArrayLike,
+        X: ArrayLike,
+        args: Any = None,
+    ) -> jax.Array:
+        """Evaluate the H46 oscillator right-hand side."""
+        del args
+        x, dotx, _Eh = jnp.asarray(X)
+        wd = 2.0 * jnp.pi * problem.fd
         ddotx = (
-            -(jnp.pow(w0, 2)) / 2.0 * (jnp.pow(x / xw, 2) - 1.0) * x
-            - w0 / Q * dotx
-            + Ad * jnp.sin(wd * t)
+            -(jnp.pow(problem.w0, 2)) / 2.0 * (jnp.pow(x / problem.xw, 2) - 1.0) * x
+            - problem.w0 / problem.Q * dotx
+            + problem.Ad * jnp.sin(wd * jnp.asarray(t))
         )
-        Ph = w0 / Q * dotx**2
-        Xout = jnp.array([dotx, ddotx, Ph])
-        return Xout
+        Ph = problem.w0 / problem.Q * dotx**2
+        return jnp.array([dotx, ddotx, Ph])

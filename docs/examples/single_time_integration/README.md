@@ -22,5 +22,4 @@ Outputs are written to `outputs/simulations.parquet`.
 - Drive frequency: edit `fd` in `integrate_until_convergence_single.py`
 - Initial condition: edit `init_condition` (or its random seed)
 - Convergence criteria: edit `AttractorFinderConfig(convergence_tol=..., subharmonic_factor=...)`
-- Integration effort: edit `AttractorFinder(max_periods=..., residuals_per_period=...)`
-
+- Integration effort: edit `AttractorFinder.Params(max_periods=..., residuals_per_period=...)`

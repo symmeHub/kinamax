@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import ClassVar, NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -38,6 +38,36 @@ class OrbitTestProblem(Container):
 
     def state_weights(self):
         return jnp.ones(2)
+
+
+def orbit_namespace_rhs(problem, t, X, args=None):
+    del problem, t, args
+    return jnp.zeros_like(X)
+
+
+def orbit_namespace_state_weights(problem):
+    del problem
+    return jnp.ones(2)
+
+
+class OrbitProblemNamespace:
+    class Params(NamedTuple):
+        gain: jax.Array = jnp.array(1.0)
+
+    class Functions(NamedTuple):
+        rhs: object
+        state_weights: object
+
+    class Labels(NamedTuple):
+        state_vector_labels: tuple[str, ...] = ("x0", "x1")
+        params_labels: tuple[str, ...] = ("gain",)
+
+
+OrbitProblemNamespace.functions = OrbitProblemNamespace.Functions(
+    rhs=orbit_namespace_rhs,
+    state_weights=orbit_namespace_state_weights,
+)
+OrbitProblemNamespace.labels = OrbitProblemNamespace.Labels()
 
 
 def make_solution() -> AttractorFinderSolution:
@@ -99,7 +129,7 @@ def test_attractor_finder_solution_flattens_consistently():
 
 
 def test_attractor_finder_sizes_and_residual_helpers():
-    finder = AttractorFinder(
+    finder = AttractorFinder.Params(
         residuals_per_period=3,
         targetted_subharmonics=np.array([1, 2], dtype=int),
         max_periods=12,
@@ -114,14 +144,14 @@ def test_attractor_finder_sizes_and_residual_helpers():
         state_weights=weights,
     )
 
-    assert finder.get_max_subharmonic() == 2
-    assert finder.get_time_steps_number() == 13
-    assert finder.get_max_shooting_iterations() == 3
+    assert AttractorFinder.get_max_subharmonic(finder) == 2
+    assert AttractorFinder.get_time_steps_number(finder) == 13
+    assert AttractorFinder.get_max_shooting_iterations(finder) == 3
     assert float(residual) == pytest.approx(0.0)
 
 
 def test_find_attractors_converges_for_constant_problem():
-    finder = AttractorFinder(
+    finder = AttractorFinder.Params(
         residuals_per_period=2,
         targetted_subharmonics=np.array([1, 2], dtype=int),
         max_periods=8,
@@ -135,7 +165,12 @@ def test_find_attractors_converges_for_constant_problem():
     )
     init_conditions = jnp.array([1.5, -2.0])
 
-    _, _, _, solution = finder.find_attractors(OrbitTestProblem(), init_conditions, config)
+    _, _, _, solution = AttractorFinder.find_attractors(
+        finder,
+        OrbitTestProblem(),
+        init_conditions,
+        config,
+    )
 
     np.testing.assert_array_equal(np.asarray(solution.converged), np.array([True, True]))
     np.testing.assert_array_equal(np.asarray(solution.detected_subharmonic), np.array([1, 1]))
@@ -143,8 +178,36 @@ def test_find_attractors_converges_for_constant_problem():
     np.testing.assert_allclose(np.asarray(solution.attractors), np.array([[1.5, -2.0], [1.5, -2.0]]))
 
 
+def test_find_attractors_supports_problem_definition_namespaces():
+    finder = AttractorFinder.Params(
+        residuals_per_period=2,
+        targetted_subharmonics=np.array([1, 2], dtype=int),
+        max_periods=8,
+    )
+    config = AttractorFinderConfig(
+        init_time=jnp.array(0.0),
+        init_time_step=jnp.array(1.0e-2),
+        convergence_tol=jnp.array(1.0e-12),
+        target_frequency=1.0,
+        subharmonic_factor=10.0,
+    )
+    problem = OrbitProblemNamespace.Params(gain=jnp.array(1.0))
+    init_conditions = jnp.array([0.25, -0.5])
+
+    _, _, _, solution = AttractorFinder.find_attractors(
+        finder,
+        OrbitProblemNamespace,
+        problem,
+        init_conditions,
+        config,
+    )
+
+    np.testing.assert_array_equal(np.asarray(solution.converged), np.array([True, True]))
+    np.testing.assert_array_equal(np.asarray(solution.detected_subharmonic), np.array([1, 1]))
+
+
 def test_post_process_balances_rows_by_detected_subharmonic():
-    problems = OrbitTestProblem(gain=np.array([1.0, 2.0]))
+    problems = OrbitProblemNamespace.Params(gain=np.array([1.0, 2.0]))
     finder_configs = AttractorFinderConfig(
         init_time=np.array([0.0, 0.0]),
         init_time_step=np.array([1.0e-3, 1.0e-3]),
@@ -156,7 +219,7 @@ def test_post_process_balances_rows_by_detected_subharmonic():
     solution = make_solution()
 
     processed = post_process_attractor_finder_results(
-        problem_class=OrbitTestProblem,
+        problem_class=OrbitProblemNamespace,
         problems=problems,
         finder_configs=finder_configs,
         init_conditions=init_conditions,
@@ -201,7 +264,7 @@ def test_detect_orbits_groups_rotated_sequences_into_one_orbit():
     )
 
     attractors, sim_orbit = detect_orbits(
-        problem_class=OrbitTestProblem,
+        problem_class=OrbitProblemNamespace,
         simulations=simulations,
         ode_params_labels=["gain"],
         attractor_state_vec_labels=["x0", "x1"],

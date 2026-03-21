@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections import defaultdict, namedtuple
-from collections.abc import Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any, NamedTuple, TypeVar
 
 import jax
@@ -35,6 +35,111 @@ __all__ = [
 ]
 
 P = TypeVar("P")
+ProblemDefinition = Any
+
+
+def _is_namedtuple_instance(obj: Any) -> bool:
+    """Return True when *obj* is an instance of a NamedTuple subclass."""
+    return isinstance(obj, tuple) and hasattr(obj, "_fields")
+
+
+def _flatten_object_to_numpy_dict(
+    obj: Any, *, flatten: bool = True, skip_fields: frozenset[str] | None = None
+) -> dict[str, np.ndarray]:
+    """Flatten container- or NamedTuple-based objects to NumPy arrays."""
+    skip = frozenset() if skip_fields is None else skip_fields
+    if isinstance(obj, Container):
+        return obj.as_dict(flatten=flatten)
+
+    if _is_namedtuple_instance(obj):
+        dic: dict[str, np.ndarray] = {}
+        for field in obj._fields:
+            if field in skip:
+                continue
+            value = getattr(obj, field)
+            if _is_namedtuple_instance(value):
+                nested = _flatten_object_to_numpy_dict(
+                    value,
+                    flatten=flatten,
+                    skip_fields=frozenset({"functions", "labels", "metadata"}),
+                )
+                dic.update(nested)
+                continue
+            if callable(value):
+                continue
+            array = np.asarray(value)
+            dic[field] = array.flatten() if flatten else array
+        return dic
+
+    raise TypeError(
+        "Expected a Container or NamedTuple instance when converting to a table."
+    )
+
+
+def _object_to_polars(obj: Any, *, repeat: int = 0) -> pl.DataFrame:
+    """Convert a supported object to a Polars DataFrame."""
+    dic = _flatten_object_to_numpy_dict(
+        obj,
+        flatten=True,
+        skip_fields=frozenset({"functions", "labels", "metadata"}),
+    )
+    if repeat > 0:
+        for key, value in dic.items():
+            dic[key] = value.repeat(repeat)
+    return pl.DataFrame(dic)
+
+
+def get_problem_state_vector_labels(problem_definition: ProblemDefinition) -> list[str]:
+    """Return state labels from a problem definition namespace or legacy class."""
+    if hasattr(problem_definition, "state_vector_labels"):
+        return list(problem_definition.state_vector_labels)
+    if hasattr(problem_definition, "labels"):
+        return list(problem_definition.labels.state_vector_labels)
+    raise AttributeError("Problem definition must expose state_vector_labels.")
+
+
+def get_problem_params_labels(problem_definition: ProblemDefinition) -> list[str]:
+    """Return parameter labels from a problem definition namespace or legacy class."""
+    if hasattr(problem_definition, "params_labels"):
+        return list(problem_definition.params_labels)
+    if hasattr(problem_definition, "labels"):
+        return list(problem_definition.labels.params_labels)
+    raise AttributeError("Problem definition must expose params_labels.")
+
+
+def instantiate_problem(
+    problem_definition: ProblemDefinition, **parameters: Any
+) -> Any:
+    """Instantiate a problem data object from a namespace or legacy dataclass."""
+    if hasattr(problem_definition, "Params"):
+        return problem_definition.Params(**parameters)
+    return problem_definition(**parameters)
+
+
+def get_problem_rhs(
+    problem: Any, problem_definition: ProblemDefinition | None = None
+) -> Callable[[jax.Array, jax.Array, Any], jax.Array]:
+    """Return an RHS callable compatible with Diffrax."""
+    if problem_definition is not None and hasattr(problem_definition, "rhs"):
+        return lambda t, X, args=None: problem_definition.rhs(problem, t, X, args)
+    if problem_definition is not None and hasattr(problem_definition, "functions"):
+        return lambda t, X, args=None: problem_definition.functions.rhs(problem, t, X, args)
+    if hasattr(problem, "rhs"):
+        return problem.rhs
+    raise TypeError("Problem definitions must provide an RHS function.")
+
+
+def get_problem_state_weights(
+    problem: Any, problem_definition: ProblemDefinition | None = None
+) -> jax.Array:
+    """Return per-state weights for the supplied problem data."""
+    if problem_definition is not None and hasattr(problem_definition, "state_weights"):
+        return problem_definition.state_weights(problem)
+    if problem_definition is not None and hasattr(problem_definition, "functions"):
+        return problem_definition.functions.state_weights(problem)
+    if hasattr(problem, "state_weights"):
+        return problem.state_weights()
+    raise TypeError("Problem definitions must provide a state-weights function.")
 
 
 @dataclass
@@ -58,18 +163,12 @@ class Container:
         return pl.DataFrame(dic)
 
 
-@register_dataclass
-@dataclass
-class AttractorFinderConfig(Container):
+class AttractorFinderConfig(NamedTuple):
     """Configuration values driving the shooting-based attractor search."""
 
-    init_time: jax.Array = field(default_factory=lambda: jnp.array(0.0, dtype=float))
-    init_time_step: jax.Array = field(
-        default_factory=lambda: jnp.array(1.0e-3, dtype=float)
-    )
-    convergence_tol: jax.Array = field(
-        default_factory=lambda: jnp.array(1.0e-6, dtype=float)
-    )
+    init_time: jax.Array = jnp.array(0.0, dtype=float)
+    init_time_step: jax.Array = jnp.array(1.0e-3, dtype=float)
+    convergence_tol: jax.Array = jnp.array(1.0e-6, dtype=float)
     target_frequency: float = 50.0
     subharmonic_factor: float = 10.0
 
@@ -97,7 +196,7 @@ def convert_subharmonics_flags(
 @register_dataclass
 @dataclass
 class AttractorFinderSolution(Container):
-    """Structured output produced by :meth:`AttractorFinder.find_attractors`."""
+    """Structured output produced by `AttractorFinder.find_attractors`."""
 
     attractors: jax.Array
     detected_subharmonic: jax.Array
@@ -147,199 +246,34 @@ class AttractorFinderSolution(Container):
         return pl.DataFrame(self.as_dict(state_vector_labels=state_vector_labels))
 
 
-class AttractorFinder(NamedTuple):
-    """Shooting-based attractor finder for periodically forced ODE systems."""
+class AttractorFinder:
+    """Namespace holding attractor-finder data layouts and static helpers."""
 
-    residuals_per_period: int = 10
-    targetted_subharmonics: npt.NDArray[np.int_] = np.array([1, 3, 5], dtype=int)
-    max_periods: int = 1000
-    controller: PIDController = PIDController(rtol=1e-7, atol=1e-9)
-    solver: Tsit5 = Tsit5()
+    class Params(NamedTuple):
+        """Static settings for the shooting-based attractor search."""
 
-    def get_max_subharmonic(self) -> int:
+        residuals_per_period: int = 10
+        targetted_subharmonics: npt.NDArray[np.int_] = np.array([1, 3, 5], dtype=int)
+        max_periods: int = 1000
+        controller: PIDController = PIDController(rtol=1e-7, atol=1e-9)
+        solver: Tsit5 = Tsit5()
+
+    @staticmethod
+    def get_max_subharmonic(finder: "AttractorFinder.Params") -> int:
         """Return the largest targeted subharmonic order."""
-        return int(np.max(np.asarray(self.targetted_subharmonics)))
+        return int(np.max(np.asarray(finder.targetted_subharmonics)))
 
-    def get_time_steps_number(self) -> int:
+    @staticmethod
+    def get_time_steps_number(finder: "AttractorFinder.Params") -> int:
         """Return the number of saved samples for one shooting window."""
-        max_subharmonic = self.get_max_subharmonic()
-        return 2 * max_subharmonic * int(self.residuals_per_period) + 1
+        max_subharmonic = AttractorFinder.get_max_subharmonic(finder)
+        return 2 * max_subharmonic * int(finder.residuals_per_period) + 1
 
-    def get_max_shooting_iterations(self) -> int:
+    @staticmethod
+    def get_max_shooting_iterations(finder: "AttractorFinder.Params") -> int:
         """Return the maximum number of shooting windows to integrate."""
-        max_subharmonic = self.get_max_subharmonic()
-        return self.max_periods // (2 * max_subharmonic)
-
-    def find_attractors(
-        self,
-        problem: P,
-        init_conditions: jax.Array,
-        finder_config: AttractorFinderConfig,
-    ) -> tuple[P, AttractorFinderConfig, jax.Array, AttractorFinderSolution]:
-        """Integrate until convergence and then sample the attractor over one orbit."""
-
-        def body_fun(carry):
-            """Advance the shooting window and update convergence diagnostics."""
-
-            start_time = carry.start_time
-            end_time = carry.end_time
-            init_conditions = carry.init_conditions
-            iteration = carry.iteration
-            finder_config = carry.finder_config
-            convergence_tol = finder_config.convergence_tol
-            flag = carry.flag
-            # max_shooting_iterations = finder_config.get_max_shooting_iterations()
-            (
-                Xout,
-                res,
-                start_time,
-                end_time,
-            ) = AttractorFinder.integrate_and_check_convergence(
-                init_conditions=init_conditions,
-                start_time=start_time,
-                end_time=end_time,
-                steps_number=time_steps_number,
-                problem=carry.problem,
-                solver=solver,
-                controller=controller,
-                init_time_step=carry.finder_config.init_time_step,
-                # target_frequency=carry.target_frequency,
-                targetted_subharmonics=targetted_subharmonics,
-                residuals_per_period=residuals_per_period,
-            )
-            iteration += 1
-            flag = jnp.where(
-                jnp.any(res <= convergence_tol), 1, flag
-            )  # CONVERGENCE ACHIEVED
-            flag = jnp.where(
-                iteration >= max_shooting_iterations, 2, flag
-            )  # EXCEED MAX ITERATIONS
-            carry = Carry(
-                iteration=iteration,
-                flag=flag,
-                residuals=res,
-                start_time=start_time,
-                end_time=end_time,
-                init_conditions=Xout,
-                problem=carry.problem,
-                target_frequency=carry.target_frequency,
-                finder_config=carry.finder_config,
-            )
-            return carry
-
-        def condition_fun(carry):
-            """Continue until convergence is reached or iteration budget is exhausted."""
-
-            flag = carry.flag
-            return jnp.all(flag == 0)
-
-        Carry = namedtuple(
-            "Carry",
-            [
-                "iteration",
-                "residuals",
-                "start_time",
-                "end_time",
-                "init_conditions",
-                "problem",
-                "target_frequency",
-                "finder_config",
-                "flag",
-            ],
-        )
-        solver = self.solver
-        controller = self.controller
-        residuals_per_period = int(self.residuals_per_period)
-        targetted_subharmonics = self.targetted_subharmonics
-        target_frequency = finder_config.target_frequency
-        max_subharmonic = self.get_max_subharmonic()
-        time_steps_number = self.get_time_steps_number()
-        max_shooting_iterations = self.get_max_shooting_iterations()
-        init_time = finder_config.init_time
-        subharmonic_factor = finder_config.subharmonic_factor
-        target_period = 1.0 / target_frequency
-        duration = 2.0 * max_subharmonic * target_period
-        start_time = finder_config.init_time
-        end_time = start_time + duration
-        iteration = jnp.array(0)
-        flag = jnp.array(0)
-        residuals = jnp.zeros(targetted_subharmonics.shape)
-
-        carry_in = Carry(
-            iteration=iteration,
-            flag=flag,
-            residuals=residuals,
-            start_time=start_time,
-            end_time=end_time,
-            init_conditions=init_conditions,
-            problem=problem,
-            target_frequency=target_frequency,
-            finder_config=finder_config,
-        )
-        carry_out = lax.while_loop(
-            body_fun=body_fun,
-            cond_fun=condition_fun,
-            init_val=carry_in,
-        )
-        final_flag = carry_out.flag
-        end_time = carry_out.start_time
-        final_conditions = carry_out.init_conditions
-        simulated_time = end_time - init_time
-        iterations = carry_out.iteration
-        simulated_periods = 2 * max_subharmonic * iterations
-        residuals = carry_out.residuals
-        subharmonic_flag = (
-            (final_flag == 1) & (residuals <= residuals.min() * subharmonic_factor)
-        ) * 1
-        # subharmonic_flag = ((final_flag == 1) & (residuals == residuals.min())) * 1
-        # subharmonic_mask = targetted_subharmonics.max() + 1
-        detected_subharmonic = jnp.where(
-            subharmonic_flag == 1, targetted_subharmonics, jnp.inf
-        ).min()
-        detected_subharmonic = jnp.where(
-            detected_subharmonic == jnp.inf, 0, detected_subharmonic
-        ).astype(int)
-        subharmonic_residual = jnp.where(
-            detected_subharmonic == targetted_subharmonics, residuals, jnp.inf
-        ).min()
-        min_residual = residuals.min()
-        # Sample the converged trajectory once per target period to expose attractors.
-        term = ODETerm(problem.rhs)
-        tg = jnp.arange(1, max_subharmonic + 1)
-        t0 = finder_config.init_time
-        t1 = t0 + max_subharmonic * target_period
-        dt0 = finder_config.init_time_step
-        ts = tg * target_period + t0
-        saveat = SaveAt(ts=ts)
-        sol = diffeqsolve(
-            term,
-            solver,
-            t0,
-            t1,
-            dt0,
-            final_conditions,
-            saveat=saveat,
-            args=None,
-            stepsize_controller=controller,
-            max_steps=None,
-        )
-
-        attractors = sol.ys
-
-        solution = AttractorFinderSolution(
-            attractors=attractors,
-            detected_subharmonic=detected_subharmonic
-            * np.ones(max_subharmonic, dtype=int),
-            subharmonic_residual=subharmonic_residual
-            * np.ones(max_subharmonic, dtype=float),
-            minimum_residual=min_residual * np.ones(max_subharmonic, dtype=float),
-            simulated_periods=simulated_periods * np.ones(max_subharmonic, dtype=int),
-            simulated_time=simulated_time * np.ones(max_subharmonic, dtype=float),
-            converged=(final_flag == 1) * np.ones(max_subharmonic, dtype=bool),
-            final_flag=final_flag * np.ones(max_subharmonic, dtype=int),
-            simulated_iterations=iterations * np.ones(max_subharmonic, dtype=int),
-        )
-        return problem, finder_config, init_conditions, solution
+        max_subharmonic = AttractorFinder.get_max_subharmonic(finder)
+        return finder.max_periods // (2 * max_subharmonic)
 
     @staticmethod
     def calculate_subharmonic_atomic_residual(
@@ -359,21 +293,20 @@ class AttractorFinder(NamedTuple):
         state_weights: ArrayLike,
     ) -> jax.Array:
         """Calculate the weighted shooting residual for one candidate subharmonic."""
-        calculate_residuals = AttractorFinder.calculate_subharmonic_atomic_residual
         offset = residuals_per_period * subharmonic
         args_in = (0.0, offset, X, state_weights)
-        out = lax.fori_loop(0, offset, calculate_residuals, args_in)
+        out = lax.fori_loop(0, offset, AttractorFinder.calculate_subharmonic_atomic_residual, args_in)
         return out[0] * subharmonic**2 / residuals_per_period
 
     @staticmethod
     def integrate_and_check_convergence(
+        finder: "AttractorFinder.Params",
         init_conditions: ArrayLike,
         start_time: ArrayLike,
         end_time: ArrayLike,
         steps_number: int,
+        problem_definition: ProblemDefinition | None,
         problem: Any,
-        solver: Tsit5,
-        controller: PIDController,
         init_time_step: ArrayLike,
         targetted_subharmonics: ArrayLike,
         residuals_per_period: int,
@@ -381,45 +314,201 @@ class AttractorFinder(NamedTuple):
         """Integrate one shooting window and evaluate residuals for each target."""
         t0 = start_time
         t1 = end_time
-        dt0 = init_time_step
-        X0 = init_conditions
-        term = ODETerm(problem.rhs)
+        rhs = get_problem_rhs(problem, problem_definition)
+        term = ODETerm(rhs)
         batched_calculate_subharmonic_residual = vmap(
             AttractorFinder.calculate_subharmonic_residual,
             in_axes=(0, None, None, None),
         )
         tg = jnp.arange(steps_number)
         ts = tg * (t1 - t0) / (steps_number - 1) + t0
-        ts = ts.at[0].set(t0)  # Ensure the first time step
-        ts = ts.at[-1].set(t1)  # Ensure the last time step
+        ts = ts.at[0].set(t0)
+        ts = ts.at[-1].set(t1)
         saveat = SaveAt(ts=ts)
         sol = diffeqsolve(
             term,
-            solver,
+            finder.solver,
             t0,
             t1,
-            dt0,
-            X0,
+            init_time_step,
+            init_conditions,
             saveat=saveat,
             args=None,
-            stepsize_controller=controller,
+            stepsize_controller=finder.controller,
             max_steps=None,
         )
 
         Xs = sol.ys
-        state_weights = problem.state_weights()
+        state_weights = get_problem_state_weights(problem, problem_definition)
         res = batched_calculate_subharmonic_residual(
             targetted_subharmonics, Xs, residuals_per_period, state_weights
         )
-        X2 = Xs[-1]
-        t2 = t1 + (t1 - t0)
-        return X2, res, t1, t2
+        return Xs[-1], res, t1, t1 + (t1 - t0)
 
+    @staticmethod
+    def find_attractors(
+        finder: "AttractorFinder.Params",
+        problem_definition_or_problem: ProblemDefinition | P,
+        problem_or_init_conditions: P | jax.Array,
+        init_conditions_or_finder_config: jax.Array | AttractorFinderConfig,
+        finder_config: AttractorFinderConfig | None = None,
+    ) -> tuple[P, AttractorFinderConfig, jax.Array, AttractorFinderSolution]:
+        """Integrate until convergence and then sample the attractor over one orbit.
 
+        This function accepts either the legacy call shape
+        ``find_attractors(finder, problem, init_conditions, finder_config)`` or the
+        data-oriented shape
+        ``find_attractors(finder, problem_definition, problem, init_conditions, finder_config)``.
+        """
+        if finder_config is None:
+            problem_definition = None
+            problem = problem_definition_or_problem
+            init_conditions = problem_or_init_conditions
+            finder_config = init_conditions_or_finder_config
+        else:
+            problem_definition = problem_definition_or_problem
+            problem = problem_or_init_conditions
+            init_conditions = init_conditions_or_finder_config
+
+        def body_fun(carry):
+            start_time = carry.start_time
+            end_time = carry.end_time
+            iteration = carry.iteration
+            config = carry.finder_config
+            convergence_tol = config.convergence_tol
+            flag = carry.flag
+            Xout, res, start_time, end_time = AttractorFinder.integrate_and_check_convergence(
+                finder=finder,
+                init_conditions=carry.init_conditions,
+                start_time=start_time,
+                end_time=end_time,
+                steps_number=time_steps_number,
+                problem_definition=problem_definition,
+                problem=carry.problem,
+                init_time_step=config.init_time_step,
+                targetted_subharmonics=targetted_subharmonics,
+                residuals_per_period=residuals_per_period,
+            )
+            iteration += 1
+            flag = jnp.where(jnp.any(res <= convergence_tol), 1, flag)
+            flag = jnp.where(iteration >= max_shooting_iterations, 2, flag)
+            return Carry(
+                iteration=iteration,
+                flag=flag,
+                residuals=res,
+                start_time=start_time,
+                end_time=end_time,
+                init_conditions=Xout,
+                problem=carry.problem,
+                target_frequency=carry.target_frequency,
+                finder_config=carry.finder_config,
+            )
+
+        def condition_fun(carry):
+            return jnp.all(carry.flag == 0)
+
+        Carry = namedtuple(
+            "Carry",
+            [
+                "iteration",
+                "residuals",
+                "start_time",
+                "end_time",
+                "init_conditions",
+                "problem",
+                "target_frequency",
+                "finder_config",
+                "flag",
+            ],
+        )
+
+        residuals_per_period = int(finder.residuals_per_period)
+        targetted_subharmonics = finder.targetted_subharmonics
+        target_frequency = finder_config.target_frequency
+        max_subharmonic = AttractorFinder.get_max_subharmonic(finder)
+        time_steps_number = AttractorFinder.get_time_steps_number(finder)
+        max_shooting_iterations = AttractorFinder.get_max_shooting_iterations(finder)
+        init_time = finder_config.init_time
+        subharmonic_factor = finder_config.subharmonic_factor
+        target_period = 1.0 / target_frequency
+        duration = 2.0 * max_subharmonic * target_period
+        start_time = finder_config.init_time
+        end_time = start_time + duration
+
+        carry_in = Carry(
+            iteration=jnp.array(0),
+            flag=jnp.array(0),
+            residuals=jnp.zeros(targetted_subharmonics.shape),
+            start_time=start_time,
+            end_time=end_time,
+            init_conditions=init_conditions,
+            problem=problem,
+            target_frequency=target_frequency,
+            finder_config=finder_config,
+        )
+        carry_out = lax.while_loop(
+            body_fun=body_fun,
+            cond_fun=condition_fun,
+            init_val=carry_in,
+        )
+
+        final_flag = carry_out.flag
+        end_time = carry_out.start_time
+        final_conditions = carry_out.init_conditions
+        simulated_time = end_time - init_time
+        iterations = carry_out.iteration
+        simulated_periods = 2 * max_subharmonic * iterations
+        residuals = carry_out.residuals
+        subharmonic_flag = (
+            (final_flag == 1) & (residuals <= residuals.min() * subharmonic_factor)
+        ) * 1
+        detected_subharmonic = jnp.where(
+            subharmonic_flag == 1, targetted_subharmonics, jnp.inf
+        ).min()
+        detected_subharmonic = jnp.where(
+            detected_subharmonic == jnp.inf, 0, detected_subharmonic
+        ).astype(int)
+        subharmonic_residual = jnp.where(
+            detected_subharmonic == targetted_subharmonics, residuals, jnp.inf
+        ).min()
+        min_residual = residuals.min()
+
+        rhs = get_problem_rhs(problem, problem_definition)
+        term = ODETerm(rhs)
+        tg = jnp.arange(1, max_subharmonic + 1)
+        t0 = finder_config.init_time
+        t1 = t0 + max_subharmonic * target_period
+        ts = tg * target_period + t0
+        saveat = SaveAt(ts=ts)
+        sol = diffeqsolve(
+            term,
+            finder.solver,
+            t0,
+            t1,
+            finder_config.init_time_step,
+            final_conditions,
+            saveat=saveat,
+            args=None,
+            stepsize_controller=finder.controller,
+            max_steps=None,
+        )
+
+        solution = AttractorFinderSolution(
+            attractors=sol.ys,
+            detected_subharmonic=detected_subharmonic * np.ones(max_subharmonic, dtype=int),
+            subharmonic_residual=subharmonic_residual * np.ones(max_subharmonic, dtype=float),
+            minimum_residual=min_residual * np.ones(max_subharmonic, dtype=float),
+            simulated_periods=simulated_periods * np.ones(max_subharmonic, dtype=int),
+            simulated_time=simulated_time * np.ones(max_subharmonic, dtype=float),
+            converged=(final_flag == 1) * np.ones(max_subharmonic, dtype=bool),
+            final_flag=final_flag * np.ones(max_subharmonic, dtype=int),
+            simulated_iterations=iterations * np.ones(max_subharmonic, dtype=int),
+        )
+        return problem, finder_config, init_conditions, solution
 def post_process_attractor_finder_results(
-    problem_class: type[Any],
-    problems: Container,
-    finder_configs: Container,
+    problem_class: ProblemDefinition,
+    problems: Any,
+    finder_configs: Any,
     init_conditions: ArrayLike,
     solutions: AttractorFinderSolution,
     target_subharmonics: ArrayLike,
@@ -432,7 +521,7 @@ def post_process_attractor_finder_results(
     simulation so different simulations can be compared with a consistent layout.
     """
 
-    state_vector_labels = list(problem_class.state_vector_labels)
+    state_vector_labels = get_problem_state_vector_labels(problem_class)
     state_space_dim = len(state_vector_labels)
     flattened_init = np.array(init_conditions).reshape(-1, state_space_dim)
     max_attractors = int(np.max(np.asarray(target_subharmonics)))
@@ -446,8 +535,8 @@ def post_process_attractor_finder_results(
 
     raw_data = pl.concat(
         [
-            problems.as_polars(repeat=max_attractors),
-            finder_configs.as_polars(repeat=max_attractors),
+            _object_to_polars(problems, repeat=max_attractors),
+            _object_to_polars(finder_configs, repeat=max_attractors),
             df_init_conditions,
             solutions.as_polars(state_vector_labels=solution_state_labels),
         ],
@@ -509,7 +598,7 @@ def cluster_points(
 
 
 def detect_orbits(
-    problem_class: type[Any],
+    problem_class: ProblemDefinition,
     simulations: pl.DataFrame,
     ode_params_labels: Sequence[str],
     attractor_state_vec_labels: Sequence[str],
@@ -519,7 +608,8 @@ def detect_orbits(
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Cluster attractor samples per configuration and map them to orbit IDs.
 
-    Workflow
+    Workflow:
+
     1. Group rows by ODE parameters, detected subharmonic, and target frequency
        so each configuration is processed independently.
     2. Cluster the recorded attractor points in the weighted state space to
@@ -565,8 +655,10 @@ def detect_orbits(
         # Process simulations sharing the same ODE parameters/subharmonics.
         group = group.sort(["sim_label", "attractor_label"])
         points = group.select(attractor_state_vec_labels).to_numpy()
-        problem = problem_class(**{k: params[k] for k in ode_params_labels})
-        weights = problem.state_weights()
+        problem = instantiate_problem(
+            problem_class, **{k: params[k] for k in ode_params_labels}
+        )
+        weights = get_problem_state_weights(problem, problem_class)
         nclusters, labels, centroids = cluster_points(
             points,
             weights,
