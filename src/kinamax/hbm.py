@@ -15,8 +15,9 @@ from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 from jax.typing import ArrayLike
+
+from .core import namedtuple_repr
 
 __all__ = [
     "FourierCoeffs",
@@ -30,42 +31,6 @@ __all__ = [
     "time_to_coeffs",
     "coeffs_pow",
 ]
-
-
-def _repr_preview(value: ArrayLike) -> str:
-    """Return a short human-readable preview for repr tables."""
-    array = np.asarray(value)
-    if array.ndim == 0:
-        return repr(array.item())
-    flat = array.reshape(-1)
-    if flat.size <= 6:
-        return np.array2string(flat, separator=", ")
-    head = np.array2string(flat[:3], separator=", ")
-    tail = np.array2string(flat[-3:], separator=", ")
-    return f"{head[:-1]}, ..., {tail[1:]}"
-
-
-def _repr_shape(value: ArrayLike) -> str:
-    """Return a compact shape string for repr tables."""
-    shape = np.asarray(value).shape
-    return "scalar" if shape == () else str(shape)
-
-
-def _namedtuple_repr(name: str, rows: list[dict[str, str]]) -> str:
-    """Render a compact repr table, using Polars when available."""
-    try:
-        import polars as pl
-    except ImportError:
-        lines = [name]
-        for row in rows:
-            lines.append(
-                f"  {row['field']}: shape={row['shape']}, dtype={row['dtype']}, preview={row['preview']}"
-            )
-        return "\n".join(lines)
-
-    table = pl.DataFrame(rows)
-    return f"{name}\n{table}"
-
 
 class FourierCoeffs(NamedTuple):
     """Real Fourier coefficients paired with the fundamental frequency in Hz.
@@ -89,22 +54,12 @@ class FourierCoeffs(NamedTuple):
     frequency: float | jax.Array
 
     def __repr__(self) -> str:
-        return _namedtuple_repr(
+        return namedtuple_repr(
             "FourierCoeffs",
-            [
-                {
-                    "field": "frequency",
-                    "shape": _repr_shape(self.frequency),
-                    "dtype": str(np.asarray(self.frequency).dtype),
-                    "preview": _repr_preview(self.frequency),
-                },
-                {
-                    "field": "values",
-                    "shape": _repr_shape(self.values),
-                    "dtype": str(np.asarray(self.values).dtype),
-                    "preview": _repr_preview(self.values),
-                },
-            ],
+            {
+                "frequency": self.frequency,
+                "values": self.values,
+            },
         )
 
 
@@ -148,22 +103,12 @@ class SampledSignal(NamedTuple):
         return jnp.arange(sample_count) * self.time_step[..., None]
 
     def __repr__(self) -> str:
-        return _namedtuple_repr(
+        return namedtuple_repr(
             "SampledSignal",
-            [
-                {
-                    "field": "frequency",
-                    "shape": _repr_shape(self.frequency),
-                    "dtype": str(np.asarray(self.frequency).dtype),
-                    "preview": _repr_preview(self.frequency),
-                },
-                {
-                    "field": "values",
-                    "shape": _repr_shape(self.values),
-                    "dtype": str(np.asarray(self.values).dtype),
-                    "preview": _repr_preview(self.values),
-                },
-            ],
+            {
+                "frequency": self.frequency,
+                "values": self.values,
+            },
         )
 
 

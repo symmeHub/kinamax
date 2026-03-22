@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, namedtuple
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, NamedTuple, TypeVar
 
@@ -25,6 +25,7 @@ from sklearn.cluster import DBSCAN, AgglomerativeClustering
 
 __all__ = [
     "Container",
+    "namedtuple_repr",
     "AttractorFinderConfig",
     "convert_subharmonics_flags",
     "AttractorFinderSolution",
@@ -36,6 +37,57 @@ __all__ = [
 
 P = TypeVar("P")
 ProblemDefinition = Any
+
+
+def _short_repr(value: Any, max_chars: int = 48) -> str:
+    """Return a bounded plain-text representation for non-array objects."""
+    text = repr(value)
+    return text if len(text) <= max_chars else f"{text[: max_chars - 3]}..."
+
+
+def _repr_shape(value: Any) -> str:
+    """Return a compact shape string for repr tables."""
+    shape = np.asarray(value).shape
+    return "scalar" if shape == () else str(shape)
+
+
+def _repr_dtype(value: Any) -> str:
+    """Return a stable dtype or type label for repr tables."""
+    array = np.asarray(value)
+    if array.dtype == object and array.ndim == 0:
+        return type(array.item()).__name__
+    return str(array.dtype)
+
+
+def _repr_preview(value: Any) -> str:
+    """Return a short human-readable preview for repr tables."""
+    array = np.asarray(value)
+    if array.dtype == object and array.ndim == 0:
+        return _short_repr(array.item())
+    if array.ndim == 0:
+        return repr(array.item())
+    flat = array.reshape(-1)
+    if flat.size <= 6:
+        return np.array2string(flat, separator=", ")
+    head = np.array2string(flat[:3], separator=", ")
+    tail = np.array2string(flat[-3:], separator=", ")
+    return f"{head[:-1]}, ..., {tail[1:]}"
+
+
+def namedtuple_repr(name: str, values: Mapping[str, Any]) -> str:
+    """Render a compact Polars-backed repr for NamedTuple-style containers."""
+    rows = [
+        {
+            "field": field,
+            "shape": _repr_shape(value),
+            "dtype": _repr_dtype(value),
+            "preview": _repr_preview(value),
+        }
+        for field, value in values.items()
+    ]
+    with pl.Config(tbl_width_chars=160, fmt_str_lengths=48):
+        table = pl.DataFrame(rows)
+    return f"{name}\n{table}"
 
 
 def _is_namedtuple_instance(obj: Any) -> bool:
@@ -175,6 +227,15 @@ class AttractorFinderConfig(NamedTuple):
     ...     convergence_tol=1.0e-10,
     ...     subharmonic_factor=10.0,
     ... )
+    >>> print(config)
+    AttractorFinderConfig
+    ...
+    │ init_time          ┆ scalar ┆ float64 ┆ 0.0...
+    │ init_time_step     ┆ scalar ┆ float64 ┆ 0.001...
+    │ convergence_tol    ┆ scalar ┆ float64 ┆ 1e-10...
+    │ target_frequency   ┆ scalar ┆ float64 ┆ 50.0...
+    │ subharmonic_factor ┆ scalar ┆ float64 ┆ 10.0...
+    ...
     """
 
     init_time: jax.Array = jnp.array(0.0, dtype=float)
@@ -182,6 +243,18 @@ class AttractorFinderConfig(NamedTuple):
     convergence_tol: jax.Array = jnp.array(1.0e-6, dtype=float)
     target_frequency: float = 50.0
     subharmonic_factor: float = 10.0
+
+    def __repr__(self) -> str:
+        return namedtuple_repr(
+            "AttractorFinderConfig",
+            {
+                "init_time": self.init_time,
+                "init_time_step": self.init_time_step,
+                "convergence_tol": self.convergence_tol,
+                "target_frequency": self.target_frequency,
+                "subharmonic_factor": self.subharmonic_factor,
+            },
+        )
 
 
 def convert_subharmonics_flags(
@@ -275,6 +348,15 @@ class AttractorFinder:
         ...     controller=PIDController(rtol=1e-8, atol=1e-9),
         ...     solver=Tsit5(),
         ... )
+        >>> print(finder)
+        AttractorFinder.Params
+        ...
+        │ residuals_per_period   ┆ scalar ┆ int64         ┆ 20...
+        │ targetted_subharmonics ┆ (4,)   ┆ int32         ┆ [1, 2, 3, 5]...
+        │ max_periods            ┆ scalar ┆ int64         ┆ 2000...
+        │ controller             ┆ scalar ┆ PIDController ┆ PIDController(rtol=1e-08, atol...
+        │ solver                 ┆ scalar ┆ Tsit5         ┆ Tsit5()...
+        ...
         """
 
         residuals_per_period: int = 10
@@ -282,6 +364,18 @@ class AttractorFinder:
         max_periods: int = 1000
         controller: PIDController = PIDController(rtol=1e-7, atol=1e-9)
         solver: Tsit5 = Tsit5()
+
+        def __repr__(self) -> str:
+            return namedtuple_repr(
+                "AttractorFinder.Params",
+                {
+                    "residuals_per_period": self.residuals_per_period,
+                    "targetted_subharmonics": self.targetted_subharmonics,
+                    "max_periods": self.max_periods,
+                    "controller": self.controller,
+                    "solver": self.solver,
+                },
+            )
 
     @staticmethod
     def get_max_subharmonic(finder: "AttractorFinder.Params") -> int:

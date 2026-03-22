@@ -11,6 +11,11 @@ def test_h46_params_build_namedtuple_data():
     np.testing.assert_array_equal(np.asarray(problem.fd), np.array([10.0, 20.0]))
     np.testing.assert_allclose(np.asarray(problem.Ad), 3.0)
 
+    text = repr(problem)
+    assert "H46Problem.Params" in text
+    assert "fd" in text
+    assert "(2,)" in text
+
 
 def test_h46_labels_and_weights_are_exposed_via_namespace():
     problem = H46Problem.Params(xw=jnp.array(0.5e-3), w0=jnp.array(100.0))

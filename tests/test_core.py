@@ -8,6 +8,7 @@ import polars as pl
 import pytest
 from jax.tree_util import register_dataclass
 
+from kinamax.core import namedtuple_repr
 from kinamax.integration.core import (
     AttractorFinder,
     AttractorFinderConfig,
@@ -148,6 +149,31 @@ def test_attractor_finder_sizes_and_residual_helpers():
     assert AttractorFinder.get_time_steps_number(finder) == 13
     assert AttractorFinder.get_max_shooting_iterations(finder) == 3
     assert float(residual) == pytest.approx(0.0)
+
+
+def test_namedtuple_repr_is_exposed_from_root_core_module():
+    text = namedtuple_repr("Dummy", {"gain": np.array([1.0, 2.0, 3.0])})
+
+    assert "Dummy" in text
+    assert "gain" in text
+    assert "(3,)" in text
+
+
+def test_attractor_finder_namedtuple_reprs_are_tabular():
+    finder = AttractorFinder.Params(
+        residuals_per_period=3,
+        targetted_subharmonics=np.array([1, 2], dtype=int),
+        max_periods=12,
+    )
+    config = AttractorFinderConfig(target_frequency=25.0)
+
+    finder_repr = repr(finder)
+    config_repr = repr(config)
+
+    assert "AttractorFinder.Params" in finder_repr
+    assert "targetted_subharmonics" in finder_repr
+    assert "AttractorFinderConfig" in config_repr
+    assert "target_frequency" in config_repr
 
 
 def test_find_attractors_converges_for_constant_problem():

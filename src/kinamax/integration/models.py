@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from jax.tree_util import register_dataclass
 from jax.typing import ArrayLike
 
-from .core import Container
+from .core import Container, namedtuple_repr
 
 __all__ = ["H46Problem", "H46_EM_Problem"]
 
@@ -28,8 +28,15 @@ class H46Problem:
         --------
         >>> import jax.numpy as jnp
         >>> problem = H46Problem.Params(fd=jnp.array(50.0), Ad=jnp.array(2.5))
-        >>> problem.fd
-        Array(50., dtype=float32, weak_type=True)
+        >>> print(problem)
+        H46Problem.Params
+        ...
+        │ xw    ┆ scalar ┆ float32 ┆ 0.0005000000237487257...
+        │ fd    ┆ scalar ┆ float32 ┆ 50.0...
+        │ w0    ┆ scalar ┆ float32 ┆ 121.0...
+        │ Q     ┆ scalar ┆ float32 ┆ 87.0...
+        │ Ad    ┆ scalar ┆ float32 ┆ 2.5...
+        ...
         """
 
         xw: jax.Array = jnp.array(0.5e-3)
@@ -37,6 +44,18 @@ class H46Problem:
         w0: jax.Array = jnp.array(121.0)
         Q: jax.Array = jnp.array(87.0)
         Ad: jax.Array = jnp.array(2.5)
+
+        def __repr__(self) -> str:
+            return namedtuple_repr(
+                "H46Problem.Params",
+                {
+                    "xw": self.xw,
+                    "fd": self.fd,
+                    "w0": self.w0,
+                    "Q": self.Q,
+                    "Ad": self.Ad,
+                },
+            )
 
     @staticmethod
     def state_weights(problem: "H46Problem.Params") -> jax.Array:
