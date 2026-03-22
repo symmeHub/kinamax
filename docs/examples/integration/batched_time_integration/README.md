@@ -64,7 +64,7 @@ Open `step04_plots.ipynb` to visualise:
 
 ## Running the example
 
-From `docs/examples/batched_time_integration/`, run the first three stages in order:
+From `docs/examples/integration/batched_time_integration/`, run the first three stages in order:
 
 ```bash
 python step01_integrate_until_convergence.py

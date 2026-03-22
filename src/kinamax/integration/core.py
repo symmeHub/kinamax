@@ -164,7 +164,18 @@ class Container:
 
 
 class AttractorFinderConfig(NamedTuple):
-    """Configuration values driving the shooting-based attractor search."""
+    """Configuration values driving the shooting-based attractor search.
+
+    Examples
+    --------
+    >>> config = AttractorFinderConfig(
+    ...     target_frequency=50.0,
+    ...     init_time=0.0,
+    ...     init_time_step=1.0e-3,
+    ...     convergence_tol=1.0e-10,
+    ...     subharmonic_factor=10.0,
+    ... )
+    """
 
     init_time: jax.Array = jnp.array(0.0, dtype=float)
     init_time_step: jax.Array = jnp.array(1.0e-3, dtype=float)
@@ -251,7 +262,20 @@ class AttractorFinder:
     """Namespace holding attractor-finder data layouts and static helpers."""
 
     class Params(NamedTuple):
-        """Static settings for the shooting-based attractor search."""
+        """Static settings for the shooting-based attractor search.
+
+        Examples
+        --------
+        >>> import jax.numpy as jnp
+        >>> from diffrax import PIDController, Tsit5
+        >>> finder = AttractorFinder.Params(
+        ...     residuals_per_period=20,
+        ...     targetted_subharmonics=jnp.array([1, 2, 3, 5]),
+        ...     max_periods=2000,
+        ...     controller=PIDController(rtol=1e-8, atol=1e-9),
+        ...     solver=Tsit5(),
+        ... )
+        """
 
         residuals_per_period: int = 10
         targetted_subharmonics: npt.NDArray[np.int_] = np.array([1, 3, 5], dtype=int)
@@ -365,6 +389,31 @@ class AttractorFinder:
         ``find_attractors(finder, problem, init_conditions, finder_config)`` or the
         data-oriented shape
         ``find_attractors(finder, problem_definition, problem, init_conditions, finder_config)``.
+
+        Examples
+        --------
+        >>> import jax.numpy as jnp
+        >>> from diffrax import PIDController, Tsit5
+        >>> from kinamax.integration.models import H46Problem
+        >>> problem = H46Problem.Params(fd=jnp.array(50.0), Ad=jnp.array(2.5))
+        >>> x0 = jnp.array([0.0, 0.0, 0.0])
+        >>> finder = AttractorFinder.Params(
+        ...     residuals_per_period=20,
+        ...     targetted_subharmonics=jnp.array([1, 2, 3, 5]),
+        ...     max_periods=2000,
+        ...     controller=PIDController(rtol=1e-8, atol=1e-9),
+        ...     solver=Tsit5(),
+        ... )
+        >>> config = AttractorFinderConfig(
+        ...     target_frequency=50.0,
+        ...     init_time=0.0,
+        ...     init_time_step=1.0e-3,
+        ...     convergence_tol=1.0e-10,
+        ...     subharmonic_factor=10.0,
+        ... )
+        >>> problem, config, x0, solution = AttractorFinder.find_attractors(
+        ...     finder, H46Problem, problem, x0, config
+        ... )
         """
         if finder_config is None:
             problem_definition = None
@@ -530,6 +579,40 @@ def post_process_attractor_finder_results(
     The returned table contains one row per retained attractor sample. For a
     detected subharmonic `Hk`, only the first `k` attractor rows are kept per
     simulation so different simulations can be compared with a consistent layout.
+
+    Examples
+    --------
+    >>> import jax.numpy as jnp
+    >>> from diffrax import PIDController, Tsit5
+    >>> from kinamax.integration.models import H46Problem
+    >>> problem = H46Problem.Params(fd=jnp.array(50.0), Ad=jnp.array(2.5))
+    >>> x0 = jnp.array([0.0, 0.0, 0.0])
+    >>> finder = AttractorFinder.Params(
+    ...     residuals_per_period=20,
+    ...     targetted_subharmonics=jnp.array([1, 2, 3, 5]),
+    ...     max_periods=2000,
+    ...     controller=PIDController(rtol=1e-8, atol=1e-9),
+    ...     solver=Tsit5(),
+    ... )
+    >>> config = AttractorFinderConfig(
+    ...     target_frequency=50.0,
+    ...     init_time=0.0,
+    ...     init_time_step=1.0e-3,
+    ...     convergence_tol=1.0e-10,
+    ...     subharmonic_factor=10.0,
+    ... )
+    >>> problem, config, x0, solution = AttractorFinder.find_attractors(
+    ...     finder, H46Problem, problem, x0, config
+    ... )
+    >>> table = post_process_attractor_finder_results(
+    ...     problem_class=H46Problem,
+    ...     problems=problem,
+    ...     finder_configs=config,
+    ...     init_conditions=x0,
+    ...     solutions=solution,
+    ...     target_subharmonics=jnp.array([1, 2, 3, 5]),
+    ...     solution_state_labels=["xa", "dotxa", "Eha"],
+    ... )
     """
 
     state_vector_labels = get_problem_state_vector_labels(problem_class)

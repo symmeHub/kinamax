@@ -22,7 +22,15 @@ class H46Problem:
     params_labels: tuple[str, ...] = ("xw", "w0", "Ad", "Q", "fd")
 
     class Params(NamedTuple):
-        """Physical parameters of the driven H46 oscillator."""
+        """Physical parameters of the driven H46 oscillator.
+
+        Examples
+        --------
+        >>> import jax.numpy as jnp
+        >>> problem = H46Problem.Params(fd=jnp.array(50.0), Ad=jnp.array(2.5))
+        >>> problem.fd
+        Array(50., dtype=float32, weak_type=True)
+        """
 
         xw: jax.Array = jnp.array(0.5e-3)
         fd: jax.Array = jnp.array(50.0)
@@ -58,7 +66,15 @@ class H46Problem:
 @register_dataclass
 @dataclass
 class H46_EM_Problem(Container):
-    """H46 benchmark problem with electromechanical coupling."""
+    """H46 benchmark problem with electromechanical coupling.
+
+    Examples
+    --------
+    >>> import jax.numpy as jnp
+    >>> problem = H46_EM_Problem(fd=jnp.linspace(20.0, 50.0, 11), Ad=2.5)
+    >>> problem.fd.shape
+    (11,)
+    """
 
     xw: jax.Array = 0.5e-3
     fd: jax.Array = 50.0
