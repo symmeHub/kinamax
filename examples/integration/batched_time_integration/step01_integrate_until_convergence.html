@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Step 1: Integrate A Batched Frequency Sweep Until Convergence &#8212; kinamax 0.1.0</title>
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css?v=8cd3d715" />
+    <script src="../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Step 2: Detect Orbits From The Converged Attractors" href="step02_detect_orbits.html" />
+    <link rel="prev" title="Batched time integration demo" href="README.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section class="tex2jax_ignore mathjax_ignore" id="step-1-integrate-a-batched-frequency-sweep-until-convergence">
+<h1>Step 1: Integrate A Batched Frequency Sweep Until Convergence<a class="headerlink" href="#step-1-integrate-a-batched-frequency-sweep-until-convergence" title="Link to this heading">¶</a></h1>
+<p>This notebook is the batched counterpart of the single-point tutorial.</p>
+<p>Instead of solving one problem from one initial condition, it builds:</p>
+<ul class="simple">
+<li><p>a frequency sweep,</p></li>
+<li><p>a cloud of initial conditions,</p></li>
+<li><p>a vectorized attractor search over both axes.</p></li>
+</ul>
+<p>The output is a flat table of converged attractor samples saved to
+<code class="docutils literal notranslate"><span class="pre">outputs/simulations.parquet</span></code>.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jax</span><span class="w"> </span><span class="kn">import</span> <span class="n">numpy</span> <span class="k">as</span> <span class="n">jnp</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">jax</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jax</span><span class="w"> </span><span class="kn">import</span> <span class="n">config</span><span class="p">,</span> <span class="n">vmap</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">diffrax</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tsit5</span><span class="p">,</span> <span class="n">PIDController</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">polars</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pl</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">equinox</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">eqx</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">kinamax.integration.core</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">AttractorFinder</span><span class="p">,</span>
+    <span class="n">AttractorFinderConfig</span><span class="p">,</span>
+    <span class="n">post_process_attractor_finder_results</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">kinamax.integration.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">H46_EM_Problem</span>
+
+<span class="n">config</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="s2">&quot;jax_enable_x64&quot;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>  <span class="c1"># Use double precision for improved accuracy</span>
+
+<span class="n">problem_class</span> <span class="o">=</span> <span class="n">H46_EM_Problem</span>
+</pre></div>
+</div>
+</div>
+</div>
+<section id="build-a-two-axis-batched-attractor-finder">
+<h2>Build A Two-Axis Batched Attractor Finder<a class="headerlink" href="#build-a-two-axis-batched-attractor-finder" title="Link to this heading">¶</a></h2>
+<p>The scalar routine <code class="docutils literal notranslate"><span class="pre">AttractorFinder.find_attractors(...)</span></code> works on one problem
+and one initial condition at a time.</p>
+<p>Here we wrap it twice with <code class="docutils literal notranslate"><span class="pre">vmap</span></code>:</p>
+<ul class="simple">
+<li><p>the inner <code class="docutils literal notranslate"><span class="pre">vmap</span></code> scans over the starting states,</p></li>
+<li><p>the outer <code class="docutils literal notranslate"><span class="pre">vmap</span></code> scans over the frequency-dependent problem instances.</p></li>
+</ul>
+<p>The result is then JIT-compiled once with Equinox.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build_batched_finder</span><span class="p">(</span><span class="n">find_attractors_fn</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return a JIT-compiled attractor finder that runs on a batch of problems.</span>
+
+<span class="sd">    The raw attractor-finder routine expects a single dynamical</span>
+<span class="sd">    system, a single initial condition, and a single configuration. When exploring</span>
+<span class="sd">    basins of attraction, we typically want to evaluate many initial conditions for</span>
+<span class="sd">    the same problem (or multiple frequency points) and execute the search on</span>
+<span class="sd">    accelerator hardware. This helper function wraps the user provided</span>
+<span class="sd">    ``find_attractors_fn`` in two layers of `jax.vmap` to broadcast over:</span>
+
+<span class="sd">    - the ``H46Problem`` instances that capture the drive frequency sweep,</span>
+<span class="sd">    - the initial conditions to seed the integration,</span>
+<span class="sd">    - the ``AttractorFinderConfig`` objects that contain per-frequency metadata.</span>
+
+<span class="sd">    Once vectorised, the whole routine is `jax.jit` compiled through Equinox</span>
+<span class="sd">    (`eqx.filter_jit`) so that arrays are traced efficiently and PyTrees coming</span>
+<span class="sd">    from dataclasses are handled automatically.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    find_attractors_fn:</span>
+<span class="sd">        Callable matching the signature of</span>
+<span class="sd">        ``AttractorFinder.find_attractors``.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    Callable</span>
+<span class="sd">        A compiled function that simultaneously integrates every combination of</span>
+<span class="sd">        problem, initial condition, and configuration provided.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">return</span> <span class="n">eqx</span><span class="o">.</span><span class="n">filter_jit</span><span class="p">(</span>
+        <span class="n">vmap</span><span class="p">(</span>
+            <span class="c1"># Inner vmap: for one problem/frequency, scan over all initial states.</span>
+            <span class="n">vmap</span><span class="p">(</span><span class="n">find_attractors_fn</span><span class="p">,</span> <span class="n">in_axes</span><span class="o">=</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="kc">None</span><span class="p">)),</span>
+            <span class="n">in_axes</span><span class="o">=</span><span class="p">(</span>
+                <span class="c1"># Outer vmap: advance problem parameters and matching configuration</span>
+                <span class="c1"># together across the frequency sweep.</span>
+                <span class="n">problem_class</span><span class="p">(</span>
+                    <span class="n">fd</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                    <span class="n">xw</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                    <span class="n">Q</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                    <span class="n">Ad</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                    <span class="n">w0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                    <span class="n">alpha</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                    <span class="n">C0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                    <span class="n">R</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                    <span class="n">L</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                    <span class="n">M</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                <span class="p">),</span>
+                <span class="kc">None</span><span class="p">,</span>
+                <span class="n">AttractorFinderConfig</span><span class="p">(</span>
+                    <span class="n">init_time</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                    <span class="n">init_time_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                    <span class="n">convergence_tol</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                    <span class="n">target_frequency</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                    <span class="n">subharmonic_factor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                <span class="p">),</span>
+            <span class="p">),</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="save-helper">
+<h2>Save Helper<a class="headerlink" href="#save-helper" title="Link to this heading">¶</a></h2>
+<p>The integration stage writes one parquet file that the next notebooks will
+consume.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">save_results</span><span class="p">(</span>
+    <span class="n">data</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">output_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span>
+    <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;simulations.parquet&quot;</span><span class="p">,</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Persist processed attractor finder results to disk.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    data:</span>
+<span class="sd">        Polars DataFrame containing the flattened attractor metadata and summary</span>
+<span class="sd">        statistics produced by :func:`post_process_attractor_finder_results`.</span>
+<span class="sd">    output_dir:</span>
+<span class="sd">        Directory (relative to this script) where the parquet file will be written.</span>
+<span class="sd">        The directory is created automatically if it does not exist.</span>
+<span class="sd">    filename:</span>
+<span class="sd">        Name of the parquet file. Use the default when following this tutorial so</span>
+<span class="sd">        the downstream notebooks can discover the expected artifact.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">output_dir</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">data</span><span class="o">.</span><span class="n">write_parquet</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">output_dir</span> <span class="o">/</span> <span class="n">filename</span><span class="p">))</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="choose-the-sweep-and-finder-parameters">
+<h2>Choose The Sweep And Finder Parameters<a class="headerlink" href="#choose-the-sweep-and-finder-parameters" title="Link to this heading">¶</a></h2>
+<p>The frequency axis and the attractor-finder settings are broadcast together.
+Every frequency point gets its own problem parameters and matching
+<code class="docutils literal notranslate"><span class="pre">AttractorFinderConfig</span></code>.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">example_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span> <span class="k">if</span> <span class="s2">&quot;__file__&quot;</span> <span class="ow">in</span> <span class="nb">globals</span><span class="p">()</span> <span class="k">else</span> <span class="n">Path</span><span class="o">.</span><span class="n">cwd</span><span class="p">()</span>
+<span class="n">output_dir</span> <span class="o">=</span> <span class="n">example_dir</span> <span class="o">/</span> <span class="s2">&quot;outputs&quot;</span>
+
+<span class="n">fd</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span> <span class="mf">50.0</span><span class="p">,</span> <span class="mi">11</span><span class="p">)</span>
+<span class="n">finder_config</span> <span class="o">=</span> <span class="n">AttractorFinderConfig</span><span class="p">(</span>
+    <span class="n">convergence_tol</span><span class="o">=</span><span class="mf">1.0e-10</span><span class="p">,</span>
+    <span class="n">target_frequency</span><span class="o">=</span><span class="n">fd</span><span class="p">,</span>
+    <span class="n">init_time</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+    <span class="n">init_time_step</span><span class="o">=</span><span class="mf">1.0e-3</span><span class="p">,</span>
+    <span class="n">subharmonic_factor</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">solver</span> <span class="o">=</span> <span class="n">Tsit5</span><span class="p">()</span>
+<span class="n">controller</span> <span class="o">=</span> <span class="n">PIDController</span><span class="p">(</span><span class="n">rtol</span><span class="o">=</span><span class="mf">1e-8</span><span class="p">,</span> <span class="n">atol</span><span class="o">=</span><span class="mf">1e-9</span><span class="p">)</span>
+<span class="n">target_subharmonics</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">5</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">)</span>
+<span class="n">attractor_finder</span> <span class="o">=</span> <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">Params</span><span class="p">(</span>
+    <span class="n">residuals_per_period</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+    <span class="n">targetted_subharmonics</span><span class="o">=</span><span class="n">target_subharmonics</span><span class="p">,</span>
+    <span class="n">max_periods</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span>
+    <span class="n">controller</span><span class="o">=</span><span class="n">controller</span><span class="p">,</span>
+    <span class="n">solver</span><span class="o">=</span><span class="n">solver</span><span class="p">,</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="generate-the-batched-problems-and-initial-conditions">
+<h2>Generate The Batched Problems And Initial Conditions<a class="headerlink" href="#generate-the-batched-problems-and-initial-conditions" title="Link to this heading">¶</a></h2>
+<p>The electromechanical model has five states. Each row of <code class="docutils literal notranslate"><span class="pre">init_conditions</span></code>
+defines one starting point, and each column matches one state component of the
+model.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">problem</span> <span class="o">=</span> <span class="n">problem_class</span><span class="p">(</span><span class="n">fd</span><span class="o">=</span><span class="n">fd</span><span class="p">,</span> <span class="n">Ad</span><span class="o">=</span><span class="mf">2.5</span><span class="p">)</span>
+<span class="n">key</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">PRNGKey</span><span class="p">(</span><span class="mi">758493</span><span class="p">)</span>
+<span class="n">Nstart</span> <span class="o">=</span> <span class="mi">20</span>
+<span class="n">init_conditions</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="p">(</span><span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">Nstart</span><span class="p">,</span> <span class="mi">5</span><span class="p">))</span> <span class="o">-</span> <span class="mf">0.5</span><span class="p">)</span>
+    <span class="o">*</span> <span class="mf">2.0</span>
+    <span class="o">*</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">5.0</span> <span class="o">*</span> <span class="n">problem</span><span class="o">.</span><span class="n">xw</span><span class="p">,</span> <span class="mf">10.0</span> <span class="o">*</span> <span class="n">problem</span><span class="o">.</span><span class="n">xw</span> <span class="o">*</span> <span class="n">problem</span><span class="o">.</span><span class="n">w0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">])</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="run-the-batched-attractor-search">
+<h2>Run The Batched Attractor Search<a class="headerlink" href="#run-the-batched-attractor-search" title="Link to this heading">¶</a></h2>
+<p>The returned arrays keep the full batched structure:
+frequency point, initial condition, and attractor sample along the detected
+orbit.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">batched_find</span> <span class="o">=</span> <span class="n">build_batched_finder</span><span class="p">(</span>
+    <span class="k">lambda</span> <span class="n">problem</span><span class="p">,</span> <span class="n">x0</span><span class="p">,</span> <span class="n">cfg</span><span class="p">:</span> <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">find_attractors</span><span class="p">(</span>
+        <span class="n">attractor_finder</span><span class="p">,</span> <span class="n">problem</span><span class="p">,</span> <span class="n">x0</span><span class="p">,</span> <span class="n">cfg</span>
+    <span class="p">)</span>
+<span class="p">)</span>
+<span class="n">problems</span><span class="p">,</span> <span class="n">finder_configs</span><span class="p">,</span> <span class="n">vmaped_init</span><span class="p">,</span> <span class="n">solutions</span> <span class="o">=</span> <span class="n">batched_find</span><span class="p">(</span>
+    <span class="n">problem</span><span class="p">,</span>
+    <span class="n">init_conditions</span><span class="p">,</span>
+    <span class="n">finder_config</span><span class="p">,</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="flatten-and-save-the-result">
+<h2>Flatten And Save The Result<a class="headerlink" href="#flatten-and-save-the-result" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">post_process_attractor_finder_results(...)</span></code> turns the batched PyTree into one
+tidy table that downstream steps can consume directly.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">processed</span> <span class="o">=</span> <span class="n">post_process_attractor_finder_results</span><span class="p">(</span>
+    <span class="n">problem_class</span><span class="o">=</span><span class="n">problem_class</span><span class="p">,</span>
+    <span class="n">problems</span><span class="o">=</span><span class="n">problems</span><span class="p">,</span>
+    <span class="n">finder_configs</span><span class="o">=</span><span class="n">finder_configs</span><span class="p">,</span>
+    <span class="n">init_conditions</span><span class="o">=</span><span class="n">vmaped_init</span><span class="p">,</span>
+    <span class="n">solutions</span><span class="o">=</span><span class="n">solutions</span><span class="p">,</span>
+    <span class="n">target_subharmonics</span><span class="o">=</span><span class="n">target_subharmonics</span><span class="p">,</span>
+    <span class="n">solution_state_labels</span><span class="o">=</span><span class="p">[</span><span class="n">lab</span> <span class="o">+</span> <span class="s2">&quot;a&quot;</span> <span class="k">for</span> <span class="n">lab</span> <span class="ow">in</span> <span class="n">problem_class</span><span class="o">.</span><span class="n">state_vector_labels</span><span class="p">],</span>
+<span class="p">)</span>
+<span class="n">save_results</span><span class="p">(</span><span class="n">processed</span><span class="p">,</span> <span class="n">output_dir</span><span class="o">=</span><span class="n">output_dir</span><span class="p">)</span>
+<span class="n">processed</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output text_html"><div><style>
+.dataframe > thead > tr,
+.dataframe > tbody > tr {
+  text-align: right;
+  white-space: pre-wrap;
+}
+</style>
+<small>shape: (390, 35)</small><table border="1" class="dataframe"><thead><tr><th>sim_label</th><th>xw</th><th>fd</th><th>w0</th><th>Q</th><th>Ad</th><th>alpha</th><th>C0</th><th>R</th><th>L</th><th>M</th><th>init_time</th><th>init_time_step</th><th>convergence_tol</th><th>target_frequency</th><th>subharmonic_factor</th><th>x</th><th>dotx</th><th>v</th><th>Ev</th><th>Eh</th><th>attractor_label</th><th>xa</th><th>dotxa</th><th>va</th><th>Eva</th><th>Eha</th><th>detected_subharmonic</th><th>subharmonic_residual</th><th>minimum_residual</th><th>simulated_periods</th><th>simulated_time</th><th>final_flag</th><th>simulated_iterations</th><th>converged</th></tr><tr><td>i64</td><td>f64</td><td>f64</td><td>f64</td><td>f64</td><td>f64</td><td>f64</td><td>f64</td><td>f64</td><td>f64</td><td>f64</td><td>f64</td><td>f64</td><td>f64</td><td>f64</td><td>i64</td><td>f64</td><td>f64</td><td>f64</td><td>f64</td><td>f64</td><td>i64</td><td>f64</td><td>f64</td><td>f64</td><td>f64</td><td>f64</td><td>i64</td><td>f64</td><td>f64</td><td>i64</td><td>f64</td><td>i64</td><td>i64</td><td>bool</td></tr></thead><tbody><tr><td>0</td><td>0.0005</td><td>20.0</td><td>121.0</td><td>87.0</td><td>2.5</td><td>0.068</td><td>0.000001</td><td>7830.0</td><td>0.025</td><td>0.0173</td><td>0.0</td><td>0.001</td><td>1.0000e-10</td><td>20.0</td><td>10</td><td>-0.000484</td><td>-0.037689</td><td>0.03075</td><td>0.0</td><td>0.0</td><td>0</td><td>-0.000063</td><td>0.102962</td><td>-1.171435</td><td>0.004197</td><td>0.002638</td><td>1</td><td>9.9006e-11</td><td>9.9006e-11</td><td>400</td><td>20.0</td><td>1</td><td>40</td><td>true</td></tr><tr><td>1</td><td>0.0005</td><td>20.0</td><td>121.0</td><td>87.0</td><td>2.5</td><td>0.068</td><td>0.000001</td><td>7830.0</td><td>0.025</td><td>0.0173</td><td>0.0</td><td>0.001</td><td>1.0000e-10</td><td>20.0</td><td>10</td><td>0.001015</td><td>0.052439</td><td>-0.025376</td><td>-0.0</td><td>0.0</td><td>0</td><td>-0.000063</td><td>0.102962</td><td>-1.171438</td><td>0.004094</td><td>0.002578</td><td>1</td><td>4.0808e-11</td><td>4.0808e-11</td><td>380</td><td>19.0</td><td>1</td><td>38</td><td>true</td></tr><tr><td>2</td><td>0.0005</td><td>20.0</td><td>121.0</td><td>87.0</td><td>2.5</td><td>0.068</td><td>0.000001</td><td>7830.0</td><td>0.025</td><td>0.0173</td><td>0.0</td><td>0.001</td><td>1.0000e-10</td><td>20.0</td><td>10</td><td>-0.001489</td><td>0.111233</td><td>-0.819678</td><td>-0.0</td><td>0.0</td><td>0</td><td>-0.000063</td><td>0.102962</td><td>-1.171436</td><td>0.004994</td><td>0.003071</td><td>1</td><td>8.2105e-11</td><td>8.2105e-11</td><td>460</td><td>23.0</td><td>1</td><td>46</td><td>true</td></tr><tr><td>3</td><td>0.0005</td><td>20.0</td><td>121.0</td><td>87.0</td><td>2.5</td><td>0.068</td><td>0.000001</td><td>7830.0</td><td>0.025</td><td>0.0173</td><td>0.0</td><td>0.001</td><td>1.0000e-10</td><td>20.0</td><td>10</td><td>0.001264</td><td>-0.36956</td><td>0.476588</td><td>-0.0</td><td>-0.0</td><td>0</td><td>-0.000063</td><td>0.102962</td><td>-1.171439</td><td>0.005543</td><td>0.003301</td><td>1</td><td>7.4561e-11</td><td>7.4561e-11</td><td>420</td><td>21.0</td><td>1</td><td>42</td><td>true</td></tr><tr><td>4</td><td>0.0005</td><td>20.0</td><td>121.0</td><td>87.0</td><td>2.5</td><td>0.068</td><td>0.000001</td><td>7830.0</td><td>0.025</td><td>0.0173</td><td>0.0</td><td>0.001</td><td>1.0000e-10</td><td>20.0</td><td>10</td><td>0.002103</td><td>0.534186</td><td>0.85359</td><td>0.0</td><td>-0.0</td><td>0</td><td>-0.000063</td><td>0.102962</td><td>-1.171438</td><td>0.008729</td><td>0.004828</td><td>1</td><td>4.1627e-11</td><td>4.1627e-11</td><td>430</td><td>21.5</td><td>1</td><td>43</td><td>true</td></tr><tr><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td></tr><tr><td>217</td><td>0.0005</td><td>50.0</td><td>121.0</td><td>87.0</td><td>2.5</td><td>0.068</td><td>0.000001</td><td>7830.0</td><td>0.025</td><td>0.0173</td><td>0.0</td><td>0.001</td><td>1.0000e-10</td><td>50.0</td><td>10</td><td>0.002277</td><td>0.2427</td><td>-0.827828</td><td>0.0</td><td>-0.0</td><td>0</td><td>0.00005</td><td>-0.082743</td><td>-0.818026</td><td>0.004905</td><td>0.002592</td><td>3</td><td>9.1610e-11</td><td>9.1610e-11</td><td>1070</td><td>21.4</td><td>1</td><td>107</td><td>true</td></tr><tr><td>217</td><td>0.0005</td><td>50.0</td><td>121.0</td><td>87.0</td><td>2.5</td><td>0.068</td><td>0.000001</td><td>7830.0</td><td>0.025</td><td>0.0173</td><td>0.0</td><td>0.001</td><td>1.0000e-10</td><td>50.0</td><td>10</td><td>0.002277</td><td>0.2427</td><td>-0.827828</td><td>0.0</td><td>-0.0</td><td>1</td><td>-0.000816</td><td>0.053689</td><td>0.111499</td><td>0.004907</td><td>0.002593</td><td>3</td><td>9.1610e-11</td><td>9.1610e-11</td><td>1070</td><td>21.4</td><td>1</td><td>107</td><td>true</td></tr><tr><td>217</td><td>0.0005</td><td>50.0</td><td>121.0</td><td>87.0</td><td>2.5</td><td>0.068</td><td>0.000001</td><td>7830.0</td><td>0.025</td><td>0.0173</td><td>0.0</td><td>0.001</td><td>1.0000e-10</td><td>50.0</td><td>10</td><td>0.002277</td><td>0.2427</td><td>-0.827828</td><td>0.0</td><td>-0.0</td><td>2</td><td>0.000719</td><td>0.06376</td><td>0.682166</td><td>0.00491</td><td>0.002594</td><td>3</td><td>9.1610e-11</td><td>9.1610e-11</td><td>1070</td><td>21.4</td><td>1</td><td>107</td><td>true</td></tr><tr><td>218</td><td>0.0005</td><td>50.0</td><td>121.0</td><td>87.0</td><td>2.5</td><td>0.068</td><td>0.000001</td><td>7830.0</td><td>0.025</td><td>0.0173</td><td>0.0</td><td>0.001</td><td>1.0000e-10</td><td>50.0</td><td>10</td><td>0.002245</td><td>-0.438231</td><td>0.727297</td><td>-0.0</td><td>0.0</td><td>0</td><td>-0.000499</td><td>-0.009333</td><td>0.024966</td><td>0.00501</td><td>0.002425</td><td>1</td><td>7.6760e-11</td><td>7.6760e-11</td><td>970</td><td>19.4</td><td>1</td><td>97</td><td>true</td></tr><tr><td>219</td><td>0.0005</td><td>50.0</td><td>121.0</td><td>87.0</td><td>2.5</td><td>0.068</td><td>0.000001</td><td>7830.0</td><td>0.025</td><td>0.0173</td><td>0.0</td><td>0.001</td><td>1.0000e-10</td><td>50.0</td><td>10</td><td>-0.000154</td><td>-0.216524</td><td>-0.159671</td><td>0.0</td><td>0.0</td><td>0</td><td>0.000498</td><td>-0.009332</td><td>-0.027416</td><td>0.000359</td><td>0.000202</td><td>1</td><td>6.9627e-11</td><td>6.9627e-11</td><td>980</td><td>19.6</td><td>1</td><td>98</td><td>true</td></tr></tbody></table></div></div></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">kinamax</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../../../api/index.html">API Reference</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../../index.html">Examples</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../index.html">Integration Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hbm/index.html">HBM Examples</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">Examples</a><ul>
+  <li><a href="../index.html">Integration Examples</a><ul>
+  <li><a href="README.html">Batched time integration demo</a><ul>
+      <li>Previous: <a href="README.html" title="previous chapter">Batched time integration demo</a></li>
+      <li>Next: <a href="step02_detect_orbits.html" title="next chapter">Step 2: Detect Orbits From The Converged Attractors</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ludovic Charleux, Cloé Léglise, Adrien Morel, and the kinamax contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../_sources/examples/integration/batched_time_integration/step01_integrate_until_convergence.py.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

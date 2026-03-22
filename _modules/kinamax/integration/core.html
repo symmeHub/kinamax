@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>kinamax.integration.core &#8212; kinamax 0.1.0</title>
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css?v=8cd3d715" />
+    <script src="../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for kinamax.integration.core</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Time-integration orbit-finding, clustering, and result post-processing utilities.&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">defaultdict</span><span class="p">,</span> <span class="n">namedtuple</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">Mapping</span><span class="p">,</span> <span class="n">Sequence</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">NamedTuple</span><span class="p">,</span> <span class="n">TypeVar</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jax</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">jax.numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">jnp</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy.typing</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">npt</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">polars</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pl</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">diffrax</span><span class="w"> </span><span class="kn">import</span> <span class="n">ODETerm</span><span class="p">,</span> <span class="n">PIDController</span><span class="p">,</span> <span class="n">SaveAt</span><span class="p">,</span> <span class="n">Tsit5</span><span class="p">,</span> <span class="n">diffeqsolve</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jax</span><span class="w"> </span><span class="kn">import</span> <span class="n">lax</span><span class="p">,</span> <span class="n">vmap</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jax.tree_util</span><span class="w"> </span><span class="kn">import</span> <span class="n">register_dataclass</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jax.typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ArrayLike</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">cuml</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="n">cuml</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.cluster</span><span class="w"> </span><span class="kn">import</span> <span class="n">DBSCAN</span><span class="p">,</span> <span class="n">AgglomerativeClustering</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">&quot;Container&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;namedtuple_repr&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;AttractorFinderConfig&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;convert_subharmonics_flags&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;AttractorFinderSolution&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;AttractorFinder&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;post_process_attractor_finder_results&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;cluster_points&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;detect_orbits&quot;</span><span class="p">,</span>
+<span class="p">]</span>
+
+<span class="n">P</span> <span class="o">=</span> <span class="n">TypeVar</span><span class="p">(</span><span class="s2">&quot;P&quot;</span><span class="p">)</span>
+<span class="n">ProblemDefinition</span> <span class="o">=</span> <span class="n">Any</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_short_repr</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="n">max_chars</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">48</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return a bounded plain-text representation for non-array objects.&quot;&quot;&quot;</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="nb">repr</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">text</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="n">max_chars</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">text</span><span class="p">[:</span><span class="w"> </span><span class="n">max_chars</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">3</span><span class="p">]</span><span class="si">}</span><span class="s2">...&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_repr_shape</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return a compact shape string for repr tables.&quot;&quot;&quot;</span>
+    <span class="n">shape</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="n">shape</span>
+    <span class="k">return</span> <span class="s2">&quot;scalar&quot;</span> <span class="k">if</span> <span class="n">shape</span> <span class="o">==</span> <span class="p">()</span> <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_repr_dtype</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return a stable dtype or type label for repr tables.&quot;&quot;&quot;</span>
+    <span class="n">array</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">array</span><span class="o">.</span><span class="n">dtype</span> <span class="o">==</span> <span class="nb">object</span> <span class="ow">and</span> <span class="n">array</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">type</span><span class="p">(</span><span class="n">array</span><span class="o">.</span><span class="n">item</span><span class="p">())</span><span class="o">.</span><span class="vm">__name__</span>
+    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">array</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_repr_preview</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return a short human-readable preview for repr tables.&quot;&quot;&quot;</span>
+    <span class="n">array</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">array</span><span class="o">.</span><span class="n">dtype</span> <span class="o">==</span> <span class="nb">object</span> <span class="ow">and</span> <span class="n">array</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_short_repr</span><span class="p">(</span><span class="n">array</span><span class="o">.</span><span class="n">item</span><span class="p">())</span>
+    <span class="k">if</span> <span class="n">array</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">repr</span><span class="p">(</span><span class="n">array</span><span class="o">.</span><span class="n">item</span><span class="p">())</span>
+    <span class="n">flat</span> <span class="o">=</span> <span class="n">array</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">flat</span><span class="o">.</span><span class="n">size</span> <span class="o">&lt;=</span> <span class="mi">6</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array2string</span><span class="p">(</span><span class="n">flat</span><span class="p">,</span> <span class="n">separator</span><span class="o">=</span><span class="s2">&quot;, &quot;</span><span class="p">)</span>
+    <span class="n">head</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array2string</span><span class="p">(</span><span class="n">flat</span><span class="p">[:</span><span class="mi">3</span><span class="p">],</span> <span class="n">separator</span><span class="o">=</span><span class="s2">&quot;, &quot;</span><span class="p">)</span>
+    <span class="n">tail</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array2string</span><span class="p">(</span><span class="n">flat</span><span class="p">[</span><span class="o">-</span><span class="mi">3</span><span class="p">:],</span> <span class="n">separator</span><span class="o">=</span><span class="s2">&quot;, &quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">head</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2">, ..., </span><span class="si">{</span><span class="n">tail</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span><span class="si">}</span><span class="s2">&quot;</span>
+
+
+<div class="viewcode-block" id="namedtuple_repr">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.namedtuple_repr">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">namedtuple_repr</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">values</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Render a compact Polars-backed repr for NamedTuple-style containers.&quot;&quot;&quot;</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;field&quot;</span><span class="p">:</span> <span class="n">field</span><span class="p">,</span>
+            <span class="s2">&quot;shape&quot;</span><span class="p">:</span> <span class="n">_repr_shape</span><span class="p">(</span><span class="n">value</span><span class="p">),</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">_repr_dtype</span><span class="p">(</span><span class="n">value</span><span class="p">),</span>
+            <span class="s2">&quot;preview&quot;</span><span class="p">:</span> <span class="n">_repr_preview</span><span class="p">(</span><span class="n">value</span><span class="p">),</span>
+        <span class="p">}</span>
+        <span class="k">for</span> <span class="n">field</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">values</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+    <span class="p">]</span>
+    <span class="k">with</span> <span class="n">pl</span><span class="o">.</span><span class="n">Config</span><span class="p">(</span><span class="n">tbl_width_chars</span><span class="o">=</span><span class="mi">160</span><span class="p">,</span> <span class="n">fmt_str_lengths</span><span class="o">=</span><span class="mi">48</span><span class="p">):</span>
+        <span class="n">table</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="se">\n</span><span class="si">{</span><span class="n">table</span><span class="si">}</span><span class="s2">&quot;</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_is_namedtuple_instance</span><span class="p">(</span><span class="n">obj</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return True when *obj* is an instance of a NamedTuple subclass.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="s2">&quot;_fields&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_flatten_object_to_numpy_dict</span><span class="p">(</span>
+    <span class="n">obj</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">flatten</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">skip_fields</span><span class="p">:</span> <span class="nb">frozenset</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Flatten container- or NamedTuple-based objects to NumPy arrays.&quot;&quot;&quot;</span>
+    <span class="n">skip</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">()</span> <span class="k">if</span> <span class="n">skip_fields</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">skip_fields</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">Container</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">obj</span><span class="o">.</span><span class="n">as_dict</span><span class="p">(</span><span class="n">flatten</span><span class="o">=</span><span class="n">flatten</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">_is_namedtuple_instance</span><span class="p">(</span><span class="n">obj</span><span class="p">):</span>
+        <span class="n">dic</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">obj</span><span class="o">.</span><span class="n">_fields</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">skip</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">field</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">_is_namedtuple_instance</span><span class="p">(</span><span class="n">value</span><span class="p">):</span>
+                <span class="n">nested</span> <span class="o">=</span> <span class="n">_flatten_object_to_numpy_dict</span><span class="p">(</span>
+                    <span class="n">value</span><span class="p">,</span>
+                    <span class="n">flatten</span><span class="o">=</span><span class="n">flatten</span><span class="p">,</span>
+                    <span class="n">skip_fields</span><span class="o">=</span><span class="nb">frozenset</span><span class="p">({</span><span class="s2">&quot;functions&quot;</span><span class="p">,</span> <span class="s2">&quot;labels&quot;</span><span class="p">,</span> <span class="s2">&quot;metadata&quot;</span><span class="p">}),</span>
+                <span class="p">)</span>
+                <span class="n">dic</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">nested</span><span class="p">)</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="nb">callable</span><span class="p">(</span><span class="n">value</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="n">array</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+            <span class="n">dic</span><span class="p">[</span><span class="n">field</span><span class="p">]</span> <span class="o">=</span> <span class="n">array</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span> <span class="k">if</span> <span class="n">flatten</span> <span class="k">else</span> <span class="n">array</span>
+        <span class="k">return</span> <span class="n">dic</span>
+
+    <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+        <span class="s2">&quot;Expected a Container or NamedTuple instance when converting to a table.&quot;</span>
+    <span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_object_to_polars</span><span class="p">(</span><span class="n">obj</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">repeat</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Convert a supported object to a Polars DataFrame.&quot;&quot;&quot;</span>
+    <span class="n">dic</span> <span class="o">=</span> <span class="n">_flatten_object_to_numpy_dict</span><span class="p">(</span>
+        <span class="n">obj</span><span class="p">,</span>
+        <span class="n">flatten</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="n">skip_fields</span><span class="o">=</span><span class="nb">frozenset</span><span class="p">({</span><span class="s2">&quot;functions&quot;</span><span class="p">,</span> <span class="s2">&quot;labels&quot;</span><span class="p">,</span> <span class="s2">&quot;metadata&quot;</span><span class="p">}),</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="n">repeat</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">dic</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">dic</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">repeat</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">dic</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">get_problem_state_vector_labels</span><span class="p">(</span><span class="n">problem_definition</span><span class="p">:</span> <span class="n">ProblemDefinition</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return state labels from a problem definition namespace or legacy class.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">problem_definition</span><span class="p">,</span> <span class="s2">&quot;state_vector_labels&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="n">problem_definition</span><span class="o">.</span><span class="n">state_vector_labels</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">problem_definition</span><span class="p">,</span> <span class="s2">&quot;labels&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="n">problem_definition</span><span class="o">.</span><span class="n">labels</span><span class="o">.</span><span class="n">state_vector_labels</span><span class="p">)</span>
+    <span class="k">raise</span> <span class="ne">AttributeError</span><span class="p">(</span><span class="s2">&quot;Problem definition must expose state_vector_labels.&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">get_problem_params_labels</span><span class="p">(</span><span class="n">problem_definition</span><span class="p">:</span> <span class="n">ProblemDefinition</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return parameter labels from a problem definition namespace or legacy class.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">problem_definition</span><span class="p">,</span> <span class="s2">&quot;params_labels&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="n">problem_definition</span><span class="o">.</span><span class="n">params_labels</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">problem_definition</span><span class="p">,</span> <span class="s2">&quot;labels&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="n">problem_definition</span><span class="o">.</span><span class="n">labels</span><span class="o">.</span><span class="n">params_labels</span><span class="p">)</span>
+    <span class="k">raise</span> <span class="ne">AttributeError</span><span class="p">(</span><span class="s2">&quot;Problem definition must expose params_labels.&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">instantiate_problem</span><span class="p">(</span>
+    <span class="n">problem_definition</span><span class="p">:</span> <span class="n">ProblemDefinition</span><span class="p">,</span> <span class="o">**</span><span class="n">parameters</span><span class="p">:</span> <span class="n">Any</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Instantiate a problem data object from a namespace or legacy dataclass.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">problem_definition</span><span class="p">,</span> <span class="s2">&quot;Params&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">problem_definition</span><span class="o">.</span><span class="n">Params</span><span class="p">(</span><span class="o">**</span><span class="n">parameters</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">problem_definition</span><span class="p">(</span><span class="o">**</span><span class="n">parameters</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">get_problem_rhs</span><span class="p">(</span>
+    <span class="n">problem</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="n">problem_definition</span><span class="p">:</span> <span class="n">ProblemDefinition</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">,</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return an RHS callable compatible with Diffrax.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">problem_definition</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">problem_definition</span><span class="p">,</span> <span class="s2">&quot;rhs&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="k">lambda</span> <span class="n">t</span><span class="p">,</span> <span class="n">X</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">:</span> <span class="n">problem_definition</span><span class="o">.</span><span class="n">rhs</span><span class="p">(</span><span class="n">problem</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">X</span><span class="p">,</span> <span class="n">args</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">problem_definition</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">problem_definition</span><span class="p">,</span> <span class="s2">&quot;functions&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="k">lambda</span> <span class="n">t</span><span class="p">,</span> <span class="n">X</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">:</span> <span class="n">problem_definition</span><span class="o">.</span><span class="n">functions</span><span class="o">.</span><span class="n">rhs</span><span class="p">(</span><span class="n">problem</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">X</span><span class="p">,</span> <span class="n">args</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">problem</span><span class="p">,</span> <span class="s2">&quot;rhs&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">problem</span><span class="o">.</span><span class="n">rhs</span>
+    <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s2">&quot;Problem definitions must provide an RHS function.&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">get_problem_state_weights</span><span class="p">(</span>
+    <span class="n">problem</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="n">problem_definition</span><span class="p">:</span> <span class="n">ProblemDefinition</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return per-state weights for the supplied problem data.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">problem_definition</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">problem_definition</span><span class="p">,</span> <span class="s2">&quot;state_weights&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">problem_definition</span><span class="o">.</span><span class="n">state_weights</span><span class="p">(</span><span class="n">problem</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">problem_definition</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">problem_definition</span><span class="p">,</span> <span class="s2">&quot;functions&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">problem_definition</span><span class="o">.</span><span class="n">functions</span><span class="o">.</span><span class="n">state_weights</span><span class="p">(</span><span class="n">problem</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">problem</span><span class="p">,</span> <span class="s2">&quot;state_weights&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">problem</span><span class="o">.</span><span class="n">state_weights</span><span class="p">()</span>
+    <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s2">&quot;Problem definitions must provide a state-weights function.&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="Container">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.Container">[docs]</a>
+<span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">Container</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Base container exposing NumPy/Polars export helpers for array-like fields.&quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="Container.as_dict">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.Container.as_dict">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">as_dict</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">flatten</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Convert container fields to a NumPy-backed dictionary.&quot;&quot;&quot;</span>
+        <span class="n">dic</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__dict__</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">array</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+            <span class="n">dic</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">array</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span> <span class="k">if</span> <span class="n">flatten</span> <span class="k">else</span> <span class="n">array</span>
+        <span class="k">return</span> <span class="n">dic</span></div>
+
+
+<div class="viewcode-block" id="Container.as_polars">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.Container.as_polars">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">as_polars</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">repeat</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Convert the container to a Polars DataFrame.&quot;&quot;&quot;</span>
+        <span class="n">dic</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">as_dict</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">repeat</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">dic</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">dic</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">repeat</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">dic</span><span class="p">)</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="AttractorFinderConfig">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.AttractorFinderConfig">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">AttractorFinderConfig</span><span class="p">(</span><span class="n">NamedTuple</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Configuration values driving the shooting-based attractor search.</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    &gt;&gt;&gt; config = AttractorFinderConfig(</span>
+<span class="sd">    ...     target_frequency=50.0,</span>
+<span class="sd">    ...     init_time=0.0,</span>
+<span class="sd">    ...     init_time_step=1.0e-3,</span>
+<span class="sd">    ...     convergence_tol=1.0e-10,</span>
+<span class="sd">    ...     subharmonic_factor=10.0,</span>
+<span class="sd">    ... )</span>
+<span class="sd">    &gt;&gt;&gt; print(config)</span>
+<span class="sd">    AttractorFinderConfig</span>
+<span class="sd">    ...</span>
+<span class="sd">    │ init_time          ┆ scalar ┆ float64 ┆ 0.0...</span>
+<span class="sd">    │ init_time_step     ┆ scalar ┆ float64 ┆ 0.001...</span>
+<span class="sd">    │ convergence_tol    ┆ scalar ┆ float64 ┆ 1e-10...</span>
+<span class="sd">    │ target_frequency   ┆ scalar ┆ float64 ┆ 50.0...</span>
+<span class="sd">    │ subharmonic_factor ┆ scalar ┆ float64 ┆ 10.0...</span>
+<span class="sd">    ...</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">init_time</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+    <span class="n">init_time_step</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">1.0e-3</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+    <span class="n">convergence_tol</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">1.0e-6</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+    <span class="n">target_frequency</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">50.0</span>
+    <span class="n">subharmonic_factor</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">10.0</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">namedtuple_repr</span><span class="p">(</span>
+            <span class="s2">&quot;AttractorFinderConfig&quot;</span><span class="p">,</span>
+            <span class="p">{</span>
+                <span class="s2">&quot;init_time&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">init_time</span><span class="p">,</span>
+                <span class="s2">&quot;init_time_step&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">init_time_step</span><span class="p">,</span>
+                <span class="s2">&quot;convergence_tol&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">convergence_tol</span><span class="p">,</span>
+                <span class="s2">&quot;target_frequency&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">target_frequency</span><span class="p">,</span>
+                <span class="s2">&quot;subharmonic_factor&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">subharmonic_factor</span><span class="p">,</span>
+            <span class="p">},</span>
+        <span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="convert_subharmonics_flags">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.convert_subharmonics_flags">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">convert_subharmonics_flags</span><span class="p">(</span>
+    <span class="n">subharmonics_flags</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
+    <span class="n">final_flags</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
+    <span class="n">targetted_subharmonics</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">npt</span><span class="o">.</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Collapse per-target boolean flags into detected subharmonic orders.</span>
+
+<span class="sd">    For rows flagged as converged (`final_flags == 1`), the first active entry in</span>
+<span class="sd">    `subharmonics_flags` selects the matching order from `targetted_subharmonics`.</span>
+<span class="sd">    Rows without convergence keep value `0`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">subharmonics_flags_array</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">subharmonics_flags</span><span class="p">)</span>
+    <span class="n">final_flags_array</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">final_flags</span><span class="p">)</span>
+    <span class="n">targetted_subharmonics_array</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">targetted_subharmonics</span><span class="p">)</span>
+    <span class="n">detected_subharmonics</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">final_flags_array</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">sh</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">subharmonics_flags_array</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">final_flags_array</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">detected_subharmonics</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">targetted_subharmonics_array</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">sh</span> <span class="o">==</span> <span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">detected_subharmonics</span></div>
+
+
+
+<div class="viewcode-block" id="AttractorFinderSolution">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.AttractorFinderSolution">[docs]</a>
+<span class="nd">@register_dataclass</span>
+<span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">AttractorFinderSolution</span><span class="p">(</span><span class="n">Container</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Structured output produced by `AttractorFinder.find_attractors`.&quot;&quot;&quot;</span>
+
+    <span class="n">attractors</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span>
+    <span class="n">detected_subharmonic</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span>
+    <span class="n">subharmonic_residual</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span>
+    <span class="n">minimum_residual</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span>
+    <span class="n">simulated_periods</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span>
+    <span class="n">simulated_time</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span>
+    <span class="n">final_flag</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span>
+    <span class="n">simulated_iterations</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span>
+    <span class="n">converged</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span>
+
+<div class="viewcode-block" id="AttractorFinderSolution.as_dict">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.AttractorFinderSolution.as_dict">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">as_dict</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">state_vector_labels</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Flatten attractor-finder outputs to a tabular NumPy dictionary.&quot;&quot;&quot;</span>
+        <span class="n">dic</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">detected_subharmonic</span><span class="o">.</span><span class="n">shape</span>
+        <span class="n">orbit</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">s</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]))[</span><span class="o">...</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span>
+        <span class="n">attractor</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])[:,</span> <span class="kc">None</span><span class="p">]</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">s</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span>
+        <span class="p">)</span>
+        <span class="n">dic</span><span class="p">[</span><span class="s2">&quot;sim_label&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">orbit</span>
+        <span class="n">dic</span><span class="p">[</span><span class="s2">&quot;attractor_label&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">attractor</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__dict__</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">key</span> <span class="o">==</span> <span class="s2">&quot;attractors&quot;</span><span class="p">:</span>
+                <span class="n">state_dim</span> <span class="o">=</span> <span class="n">value</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+                <span class="n">value</span> <span class="o">=</span> <span class="n">value</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">state_dim</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">state_vector_labels</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">state_dim</span><span class="p">):</span>
+                        <span class="n">dic</span><span class="p">[</span><span class="n">state_vector_labels</span><span class="p">[</span><span class="n">i</span><span class="p">]]</span> <span class="o">=</span> <span class="n">value</span><span class="p">[:,</span> <span class="n">i</span><span class="p">]</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">state_dim</span><span class="p">):</span>
+                        <span class="n">dic</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;Xa_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span><span class="p">[:,</span> <span class="n">i</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">dic</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">dic</span></div>
+
+
+<div class="viewcode-block" id="AttractorFinderSolution.get_subharmonics">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.AttractorFinderSolution.get_subharmonics">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_subharmonics</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the detected subharmonic order for each flattened attractor row.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">detected_subharmonic</span><span class="p">)</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="AttractorFinderSolution.as_polars">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.AttractorFinderSolution.as_polars">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">as_polars</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">state_vector_labels</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Convert the solution object to a Polars DataFrame.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">as_dict</span><span class="p">(</span><span class="n">state_vector_labels</span><span class="o">=</span><span class="n">state_vector_labels</span><span class="p">))</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="AttractorFinder">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.AttractorFinder">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">AttractorFinder</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Namespace holding attractor-finder data layouts and static helpers.&quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="AttractorFinder.Params">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.AttractorFinder.Params">[docs]</a>
+    <span class="k">class</span><span class="w"> </span><span class="nc">Params</span><span class="p">(</span><span class="n">NamedTuple</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Static settings for the shooting-based attractor search.</span>
+
+<span class="sd">        Examples</span>
+<span class="sd">        --------</span>
+<span class="sd">        &gt;&gt;&gt; import jax.numpy as jnp</span>
+<span class="sd">        &gt;&gt;&gt; from diffrax import PIDController, Tsit5</span>
+<span class="sd">        &gt;&gt;&gt; finder = AttractorFinder.Params(</span>
+<span class="sd">        ...     residuals_per_period=20,</span>
+<span class="sd">        ...     targetted_subharmonics=jnp.array([1, 2, 3, 5]),</span>
+<span class="sd">        ...     max_periods=2000,</span>
+<span class="sd">        ...     controller=PIDController(rtol=1e-8, atol=1e-9),</span>
+<span class="sd">        ...     solver=Tsit5(),</span>
+<span class="sd">        ... )</span>
+<span class="sd">        &gt;&gt;&gt; print(finder)</span>
+<span class="sd">        AttractorFinder.Params</span>
+<span class="sd">        ...</span>
+<span class="sd">        │ residuals_per_period   ┆ scalar ┆ int64         ┆ 20...</span>
+<span class="sd">        │ targetted_subharmonics ┆ (4,)   ┆ int32         ┆ [1, 2, 3, 5]...</span>
+<span class="sd">        │ max_periods            ┆ scalar ┆ int64         ┆ 2000...</span>
+<span class="sd">        │ controller             ┆ scalar ┆ PIDController ┆ PIDController(rtol=1e-08, atol...</span>
+<span class="sd">        │ solver                 ┆ scalar ┆ Tsit5         ┆ Tsit5()...</span>
+<span class="sd">        ...</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">residuals_per_period</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span>
+        <span class="n">targetted_subharmonics</span><span class="p">:</span> <span class="n">npt</span><span class="o">.</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">int_</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">5</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">)</span>
+        <span class="n">max_periods</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1000</span>
+        <span class="n">controller</span><span class="p">:</span> <span class="n">PIDController</span> <span class="o">=</span> <span class="n">PIDController</span><span class="p">(</span><span class="n">rtol</span><span class="o">=</span><span class="mf">1e-7</span><span class="p">,</span> <span class="n">atol</span><span class="o">=</span><span class="mf">1e-9</span><span class="p">)</span>
+        <span class="n">solver</span><span class="p">:</span> <span class="n">Tsit5</span> <span class="o">=</span> <span class="n">Tsit5</span><span class="p">()</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">namedtuple_repr</span><span class="p">(</span>
+                <span class="s2">&quot;AttractorFinder.Params&quot;</span><span class="p">,</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;residuals_per_period&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">residuals_per_period</span><span class="p">,</span>
+                    <span class="s2">&quot;targetted_subharmonics&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">targetted_subharmonics</span><span class="p">,</span>
+                    <span class="s2">&quot;max_periods&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_periods</span><span class="p">,</span>
+                    <span class="s2">&quot;controller&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">controller</span><span class="p">,</span>
+                    <span class="s2">&quot;solver&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">solver</span><span class="p">,</span>
+                <span class="p">},</span>
+            <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="AttractorFinder.get_max_subharmonic">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.AttractorFinder.get_max_subharmonic">[docs]</a>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_max_subharmonic</span><span class="p">(</span><span class="n">finder</span><span class="p">:</span> <span class="s2">&quot;AttractorFinder.Params&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the largest targeted subharmonic order.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">finder</span><span class="o">.</span><span class="n">targetted_subharmonics</span><span class="p">)))</span></div>
+
+
+<div class="viewcode-block" id="AttractorFinder.get_time_steps_number">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.AttractorFinder.get_time_steps_number">[docs]</a>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_time_steps_number</span><span class="p">(</span><span class="n">finder</span><span class="p">:</span> <span class="s2">&quot;AttractorFinder.Params&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the number of saved samples for one shooting window.&quot;&quot;&quot;</span>
+        <span class="n">max_subharmonic</span> <span class="o">=</span> <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">get_max_subharmonic</span><span class="p">(</span><span class="n">finder</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">max_subharmonic</span> <span class="o">*</span> <span class="nb">int</span><span class="p">(</span><span class="n">finder</span><span class="o">.</span><span class="n">residuals_per_period</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span></div>
+
+
+<div class="viewcode-block" id="AttractorFinder.get_max_shooting_iterations">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.AttractorFinder.get_max_shooting_iterations">[docs]</a>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_max_shooting_iterations</span><span class="p">(</span><span class="n">finder</span><span class="p">:</span> <span class="s2">&quot;AttractorFinder.Params&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the maximum number of shooting windows to integrate.&quot;&quot;&quot;</span>
+        <span class="n">max_subharmonic</span> <span class="o">=</span> <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">get_max_subharmonic</span><span class="p">(</span><span class="n">finder</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">finder</span><span class="o">.</span><span class="n">max_periods</span> <span class="o">//</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">max_subharmonic</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="AttractorFinder.calculate_subharmonic_atomic_residual">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.AttractorFinder.calculate_subharmonic_atomic_residual">[docs]</a>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">calculate_subharmonic_atomic_residual</span><span class="p">(</span>
+        <span class="n">pos</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">args</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">ArrayLike</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="n">ArrayLike</span><span class="p">,</span> <span class="n">ArrayLike</span><span class="p">]</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">ArrayLike</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="n">ArrayLike</span><span class="p">,</span> <span class="n">ArrayLike</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Accumulate one term of the weighted shooting residual.&quot;&quot;&quot;</span>
+        <span class="n">norm</span><span class="p">,</span> <span class="n">offset</span><span class="p">,</span> <span class="n">X</span><span class="p">,</span> <span class="n">state_weights</span> <span class="o">=</span> <span class="n">args</span>
+        <span class="n">residual</span> <span class="o">=</span> <span class="p">(</span><span class="n">X</span><span class="p">[</span><span class="o">-</span><span class="n">pos</span> <span class="o">-</span> <span class="n">offset</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">X</span><span class="p">[</span><span class="o">-</span><span class="n">pos</span> <span class="o">-</span> <span class="mi">1</span><span class="p">])</span> <span class="o">*</span> <span class="n">state_weights</span>
+        <span class="n">norm</span> <span class="o">+=</span> <span class="p">(</span><span class="n">residual</span> <span class="o">*</span> <span class="n">residual</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">norm</span><span class="p">,</span> <span class="n">offset</span><span class="p">,</span> <span class="n">X</span><span class="p">,</span> <span class="n">state_weights</span></div>
+
+
+<div class="viewcode-block" id="AttractorFinder.calculate_subharmonic_residual">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.AttractorFinder.calculate_subharmonic_residual">[docs]</a>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">calculate_subharmonic_residual</span><span class="p">(</span>
+        <span class="n">subharmonic</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">X</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
+        <span class="n">residuals_per_period</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">state_weights</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Calculate the weighted shooting residual for one candidate subharmonic.&quot;&quot;&quot;</span>
+        <span class="n">offset</span> <span class="o">=</span> <span class="n">residuals_per_period</span> <span class="o">*</span> <span class="n">subharmonic</span>
+        <span class="n">args_in</span> <span class="o">=</span> <span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">offset</span><span class="p">,</span> <span class="n">X</span><span class="p">,</span> <span class="n">state_weights</span><span class="p">)</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">lax</span><span class="o">.</span><span class="n">fori_loop</span><span class="p">(</span>
+            <span class="mi">0</span><span class="p">,</span>
+            <span class="n">offset</span><span class="p">,</span>
+            <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">calculate_subharmonic_atomic_residual</span><span class="p">,</span>
+            <span class="n">args_in</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">out</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="n">subharmonic</span><span class="o">**</span><span class="mi">2</span> <span class="o">/</span> <span class="n">residuals_per_period</span></div>
+
+
+<div class="viewcode-block" id="AttractorFinder.integrate_and_check_convergence">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.AttractorFinder.integrate_and_check_convergence">[docs]</a>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">integrate_and_check_convergence</span><span class="p">(</span>
+        <span class="n">finder</span><span class="p">:</span> <span class="s2">&quot;AttractorFinder.Params&quot;</span><span class="p">,</span>
+        <span class="n">init_conditions</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
+        <span class="n">start_time</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
+        <span class="n">end_time</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
+        <span class="n">steps_number</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">problem_definition</span><span class="p">:</span> <span class="n">ProblemDefinition</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">problem</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+        <span class="n">init_time_step</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
+        <span class="n">targetted_subharmonics</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
+        <span class="n">residuals_per_period</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">,</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">,</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">,</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Integrate one shooting window and evaluate residuals for each target.&quot;&quot;&quot;</span>
+        <span class="n">t0</span> <span class="o">=</span> <span class="n">start_time</span>
+        <span class="n">t1</span> <span class="o">=</span> <span class="n">end_time</span>
+        <span class="n">rhs</span> <span class="o">=</span> <span class="n">get_problem_rhs</span><span class="p">(</span><span class="n">problem</span><span class="p">,</span> <span class="n">problem_definition</span><span class="p">)</span>
+        <span class="n">term</span> <span class="o">=</span> <span class="n">ODETerm</span><span class="p">(</span><span class="n">rhs</span><span class="p">)</span>
+        <span class="n">batched_calculate_subharmonic_residual</span> <span class="o">=</span> <span class="n">vmap</span><span class="p">(</span>
+            <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">calculate_subharmonic_residual</span><span class="p">,</span>
+            <span class="n">in_axes</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+        <span class="p">)</span>
+        <span class="n">tg</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">steps_number</span><span class="p">)</span>
+        <span class="n">ts</span> <span class="o">=</span> <span class="n">tg</span> <span class="o">*</span> <span class="p">(</span><span class="n">t1</span> <span class="o">-</span> <span class="n">t0</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">steps_number</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="n">t0</span>
+        <span class="n">ts</span> <span class="o">=</span> <span class="n">ts</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">t0</span><span class="p">)</span>
+        <span class="n">ts</span> <span class="o">=</span> <span class="n">ts</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">t1</span><span class="p">)</span>
+        <span class="n">saveat</span> <span class="o">=</span> <span class="n">SaveAt</span><span class="p">(</span><span class="n">ts</span><span class="o">=</span><span class="n">ts</span><span class="p">)</span>
+        <span class="n">sol</span> <span class="o">=</span> <span class="n">diffeqsolve</span><span class="p">(</span>
+            <span class="n">term</span><span class="p">,</span>
+            <span class="n">finder</span><span class="o">.</span><span class="n">solver</span><span class="p">,</span>
+            <span class="n">t0</span><span class="p">,</span>
+            <span class="n">t1</span><span class="p">,</span>
+            <span class="n">init_time_step</span><span class="p">,</span>
+            <span class="n">init_conditions</span><span class="p">,</span>
+            <span class="n">saveat</span><span class="o">=</span><span class="n">saveat</span><span class="p">,</span>
+            <span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">stepsize_controller</span><span class="o">=</span><span class="n">finder</span><span class="o">.</span><span class="n">controller</span><span class="p">,</span>
+            <span class="n">max_steps</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="n">Xs</span> <span class="o">=</span> <span class="n">sol</span><span class="o">.</span><span class="n">ys</span>
+        <span class="n">state_weights</span> <span class="o">=</span> <span class="n">get_problem_state_weights</span><span class="p">(</span><span class="n">problem</span><span class="p">,</span> <span class="n">problem_definition</span><span class="p">)</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">batched_calculate_subharmonic_residual</span><span class="p">(</span>
+            <span class="n">targetted_subharmonics</span><span class="p">,</span> <span class="n">Xs</span><span class="p">,</span> <span class="n">residuals_per_period</span><span class="p">,</span> <span class="n">state_weights</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">Xs</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">res</span><span class="p">,</span> <span class="n">t1</span><span class="p">,</span> <span class="n">t1</span> <span class="o">+</span> <span class="p">(</span><span class="n">t1</span> <span class="o">-</span> <span class="n">t0</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="AttractorFinder.find_attractors">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.AttractorFinder.find_attractors">[docs]</a>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">find_attractors</span><span class="p">(</span>
+        <span class="n">finder</span><span class="p">:</span> <span class="s2">&quot;AttractorFinder.Params&quot;</span><span class="p">,</span>
+        <span class="n">problem_definition_or_problem</span><span class="p">:</span> <span class="n">ProblemDefinition</span> <span class="o">|</span> <span class="n">P</span><span class="p">,</span>
+        <span class="n">problem_or_init_conditions</span><span class="p">:</span> <span class="n">P</span> <span class="o">|</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">,</span>
+        <span class="n">init_conditions_or_finder_config</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">|</span> <span class="n">AttractorFinderConfig</span><span class="p">,</span>
+        <span class="n">finder_config</span><span class="p">:</span> <span class="n">AttractorFinderConfig</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">P</span><span class="p">,</span> <span class="n">AttractorFinderConfig</span><span class="p">,</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">,</span> <span class="n">AttractorFinderSolution</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Integrate until convergence and then sample the attractor over one orbit.</span>
+
+<span class="sd">        This function accepts either the legacy call shape</span>
+<span class="sd">        ``find_attractors(finder, problem, init_conditions, finder_config)`` or the</span>
+<span class="sd">        data-oriented shape</span>
+<span class="sd">        ``find_attractors(finder, problem_definition, problem, init_conditions, finder_config)``.</span>
+
+<span class="sd">        Examples</span>
+<span class="sd">        --------</span>
+<span class="sd">        &gt;&gt;&gt; import jax.numpy as jnp</span>
+<span class="sd">        &gt;&gt;&gt; from diffrax import PIDController, Tsit5</span>
+<span class="sd">        &gt;&gt;&gt; from kinamax.integration.models import H46Problem</span>
+<span class="sd">        &gt;&gt;&gt; problem = H46Problem.Params(fd=jnp.array(50.0), Ad=jnp.array(2.5))</span>
+<span class="sd">        &gt;&gt;&gt; x0 = jnp.array([0.0, 0.0, 0.0])</span>
+<span class="sd">        &gt;&gt;&gt; finder = AttractorFinder.Params(</span>
+<span class="sd">        ...     residuals_per_period=20,</span>
+<span class="sd">        ...     targetted_subharmonics=jnp.array([1, 2, 3, 5]),</span>
+<span class="sd">        ...     max_periods=2000,</span>
+<span class="sd">        ...     controller=PIDController(rtol=1e-8, atol=1e-9),</span>
+<span class="sd">        ...     solver=Tsit5(),</span>
+<span class="sd">        ... )</span>
+<span class="sd">        &gt;&gt;&gt; config = AttractorFinderConfig(</span>
+<span class="sd">        ...     target_frequency=50.0,</span>
+<span class="sd">        ...     init_time=0.0,</span>
+<span class="sd">        ...     init_time_step=1.0e-3,</span>
+<span class="sd">        ...     convergence_tol=1.0e-10,</span>
+<span class="sd">        ...     subharmonic_factor=10.0,</span>
+<span class="sd">        ... )</span>
+<span class="sd">        &gt;&gt;&gt; problem, config, x0, solution = AttractorFinder.find_attractors(</span>
+<span class="sd">        ...     finder, H46Problem, problem, x0, config</span>
+<span class="sd">        ... )</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">finder_config</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">problem_definition</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">problem</span> <span class="o">=</span> <span class="n">problem_definition_or_problem</span>
+            <span class="n">init_conditions</span> <span class="o">=</span> <span class="n">problem_or_init_conditions</span>
+            <span class="n">finder_config</span> <span class="o">=</span> <span class="n">init_conditions_or_finder_config</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">problem_definition</span> <span class="o">=</span> <span class="n">problem_definition_or_problem</span>
+            <span class="n">problem</span> <span class="o">=</span> <span class="n">problem_or_init_conditions</span>
+            <span class="n">init_conditions</span> <span class="o">=</span> <span class="n">init_conditions_or_finder_config</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">body_fun</span><span class="p">(</span><span class="n">carry</span><span class="p">):</span>
+            <span class="n">start_time</span> <span class="o">=</span> <span class="n">carry</span><span class="o">.</span><span class="n">start_time</span>
+            <span class="n">end_time</span> <span class="o">=</span> <span class="n">carry</span><span class="o">.</span><span class="n">end_time</span>
+            <span class="n">iteration</span> <span class="o">=</span> <span class="n">carry</span><span class="o">.</span><span class="n">iteration</span>
+            <span class="n">config</span> <span class="o">=</span> <span class="n">carry</span><span class="o">.</span><span class="n">finder_config</span>
+            <span class="n">convergence_tol</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">convergence_tol</span>
+            <span class="n">flag</span> <span class="o">=</span> <span class="n">carry</span><span class="o">.</span><span class="n">flag</span>
+            <span class="n">Xout</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span> <span class="n">start_time</span><span class="p">,</span> <span class="n">end_time</span> <span class="o">=</span> <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">integrate_and_check_convergence</span><span class="p">(</span>
+                <span class="n">finder</span><span class="o">=</span><span class="n">finder</span><span class="p">,</span>
+                <span class="n">init_conditions</span><span class="o">=</span><span class="n">carry</span><span class="o">.</span><span class="n">init_conditions</span><span class="p">,</span>
+                <span class="n">start_time</span><span class="o">=</span><span class="n">start_time</span><span class="p">,</span>
+                <span class="n">end_time</span><span class="o">=</span><span class="n">end_time</span><span class="p">,</span>
+                <span class="n">steps_number</span><span class="o">=</span><span class="n">time_steps_number</span><span class="p">,</span>
+                <span class="n">problem_definition</span><span class="o">=</span><span class="n">problem_definition</span><span class="p">,</span>
+                <span class="n">problem</span><span class="o">=</span><span class="n">carry</span><span class="o">.</span><span class="n">problem</span><span class="p">,</span>
+                <span class="n">init_time_step</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">init_time_step</span><span class="p">,</span>
+                <span class="n">targetted_subharmonics</span><span class="o">=</span><span class="n">targetted_subharmonics</span><span class="p">,</span>
+                <span class="n">residuals_per_period</span><span class="o">=</span><span class="n">residuals_per_period</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">iteration</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="n">flag</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">res</span> <span class="o">&lt;=</span> <span class="n">convergence_tol</span><span class="p">),</span> <span class="mi">1</span><span class="p">,</span> <span class="n">flag</span><span class="p">)</span>
+            <span class="n">flag</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">iteration</span> <span class="o">&gt;=</span> <span class="n">max_shooting_iterations</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">flag</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">Carry</span><span class="p">(</span>
+                <span class="n">iteration</span><span class="o">=</span><span class="n">iteration</span><span class="p">,</span>
+                <span class="n">flag</span><span class="o">=</span><span class="n">flag</span><span class="p">,</span>
+                <span class="n">residuals</span><span class="o">=</span><span class="n">res</span><span class="p">,</span>
+                <span class="n">start_time</span><span class="o">=</span><span class="n">start_time</span><span class="p">,</span>
+                <span class="n">end_time</span><span class="o">=</span><span class="n">end_time</span><span class="p">,</span>
+                <span class="n">init_conditions</span><span class="o">=</span><span class="n">Xout</span><span class="p">,</span>
+                <span class="n">problem</span><span class="o">=</span><span class="n">carry</span><span class="o">.</span><span class="n">problem</span><span class="p">,</span>
+                <span class="n">target_frequency</span><span class="o">=</span><span class="n">carry</span><span class="o">.</span><span class="n">target_frequency</span><span class="p">,</span>
+                <span class="n">finder_config</span><span class="o">=</span><span class="n">carry</span><span class="o">.</span><span class="n">finder_config</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">condition_fun</span><span class="p">(</span><span class="n">carry</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">jnp</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">carry</span><span class="o">.</span><span class="n">flag</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+
+        <span class="n">Carry</span> <span class="o">=</span> <span class="n">namedtuple</span><span class="p">(</span>
+            <span class="s2">&quot;Carry&quot;</span><span class="p">,</span>
+            <span class="p">[</span>
+                <span class="s2">&quot;iteration&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;residuals&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;start_time&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;end_time&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;init_conditions&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;problem&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;target_frequency&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;finder_config&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;flag&quot;</span><span class="p">,</span>
+            <span class="p">],</span>
+        <span class="p">)</span>
+
+        <span class="n">residuals_per_period</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">finder</span><span class="o">.</span><span class="n">residuals_per_period</span><span class="p">)</span>
+        <span class="n">targetted_subharmonics</span> <span class="o">=</span> <span class="n">finder</span><span class="o">.</span><span class="n">targetted_subharmonics</span>
+        <span class="n">target_frequency</span> <span class="o">=</span> <span class="n">finder_config</span><span class="o">.</span><span class="n">target_frequency</span>
+        <span class="n">max_subharmonic</span> <span class="o">=</span> <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">get_max_subharmonic</span><span class="p">(</span><span class="n">finder</span><span class="p">)</span>
+        <span class="n">time_steps_number</span> <span class="o">=</span> <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">get_time_steps_number</span><span class="p">(</span><span class="n">finder</span><span class="p">)</span>
+        <span class="n">max_shooting_iterations</span> <span class="o">=</span> <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">get_max_shooting_iterations</span><span class="p">(</span><span class="n">finder</span><span class="p">)</span>
+        <span class="n">init_time</span> <span class="o">=</span> <span class="n">finder_config</span><span class="o">.</span><span class="n">init_time</span>
+        <span class="n">subharmonic_factor</span> <span class="o">=</span> <span class="n">finder_config</span><span class="o">.</span><span class="n">subharmonic_factor</span>
+        <span class="n">target_period</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="n">target_frequency</span>
+        <span class="n">duration</span> <span class="o">=</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="n">max_subharmonic</span> <span class="o">*</span> <span class="n">target_period</span>
+        <span class="n">start_time</span> <span class="o">=</span> <span class="n">finder_config</span><span class="o">.</span><span class="n">init_time</span>
+        <span class="n">end_time</span> <span class="o">=</span> <span class="n">start_time</span> <span class="o">+</span> <span class="n">duration</span>
+
+        <span class="n">carry_in</span> <span class="o">=</span> <span class="n">Carry</span><span class="p">(</span>
+            <span class="n">iteration</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span>
+            <span class="n">flag</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span>
+            <span class="n">residuals</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">targetted_subharmonics</span><span class="o">.</span><span class="n">shape</span><span class="p">),</span>
+            <span class="n">start_time</span><span class="o">=</span><span class="n">start_time</span><span class="p">,</span>
+            <span class="n">end_time</span><span class="o">=</span><span class="n">end_time</span><span class="p">,</span>
+            <span class="n">init_conditions</span><span class="o">=</span><span class="n">init_conditions</span><span class="p">,</span>
+            <span class="n">problem</span><span class="o">=</span><span class="n">problem</span><span class="p">,</span>
+            <span class="n">target_frequency</span><span class="o">=</span><span class="n">target_frequency</span><span class="p">,</span>
+            <span class="n">finder_config</span><span class="o">=</span><span class="n">finder_config</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">carry_out</span> <span class="o">=</span> <span class="n">lax</span><span class="o">.</span><span class="n">while_loop</span><span class="p">(</span>
+            <span class="n">body_fun</span><span class="o">=</span><span class="n">body_fun</span><span class="p">,</span>
+            <span class="n">cond_fun</span><span class="o">=</span><span class="n">condition_fun</span><span class="p">,</span>
+            <span class="n">init_val</span><span class="o">=</span><span class="n">carry_in</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="n">final_flag</span> <span class="o">=</span> <span class="n">carry_out</span><span class="o">.</span><span class="n">flag</span>
+        <span class="n">end_time</span> <span class="o">=</span> <span class="n">carry_out</span><span class="o">.</span><span class="n">start_time</span>
+        <span class="n">final_conditions</span> <span class="o">=</span> <span class="n">carry_out</span><span class="o">.</span><span class="n">init_conditions</span>
+        <span class="n">simulated_time</span> <span class="o">=</span> <span class="n">end_time</span> <span class="o">-</span> <span class="n">init_time</span>
+        <span class="n">iterations</span> <span class="o">=</span> <span class="n">carry_out</span><span class="o">.</span><span class="n">iteration</span>
+        <span class="n">simulated_periods</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">max_subharmonic</span> <span class="o">*</span> <span class="n">iterations</span>
+        <span class="n">residuals</span> <span class="o">=</span> <span class="n">carry_out</span><span class="o">.</span><span class="n">residuals</span>
+        <span class="n">subharmonic_flag</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="p">(</span><span class="n">final_flag</span> <span class="o">==</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">residuals</span> <span class="o">&lt;=</span> <span class="n">residuals</span><span class="o">.</span><span class="n">min</span><span class="p">()</span> <span class="o">*</span> <span class="n">subharmonic_factor</span><span class="p">)</span>
+        <span class="p">)</span> <span class="o">*</span> <span class="mi">1</span>
+        <span class="n">detected_subharmonic</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+            <span class="n">subharmonic_flag</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="n">targetted_subharmonics</span><span class="p">,</span> <span class="n">jnp</span><span class="o">.</span><span class="n">inf</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">min</span><span class="p">()</span>
+        <span class="n">detected_subharmonic</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+            <span class="n">detected_subharmonic</span> <span class="o">==</span> <span class="n">jnp</span><span class="o">.</span><span class="n">inf</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">detected_subharmonic</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+        <span class="n">subharmonic_residual</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+            <span class="n">detected_subharmonic</span> <span class="o">==</span> <span class="n">targetted_subharmonics</span><span class="p">,</span> <span class="n">residuals</span><span class="p">,</span> <span class="n">jnp</span><span class="o">.</span><span class="n">inf</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">min</span><span class="p">()</span>
+        <span class="n">min_residual</span> <span class="o">=</span> <span class="n">residuals</span><span class="o">.</span><span class="n">min</span><span class="p">()</span>
+
+        <span class="n">rhs</span> <span class="o">=</span> <span class="n">get_problem_rhs</span><span class="p">(</span><span class="n">problem</span><span class="p">,</span> <span class="n">problem_definition</span><span class="p">)</span>
+        <span class="n">term</span> <span class="o">=</span> <span class="n">ODETerm</span><span class="p">(</span><span class="n">rhs</span><span class="p">)</span>
+        <span class="n">tg</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">max_subharmonic</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="n">t0</span> <span class="o">=</span> <span class="n">finder_config</span><span class="o">.</span><span class="n">init_time</span>
+        <span class="n">t1</span> <span class="o">=</span> <span class="n">t0</span> <span class="o">+</span> <span class="n">max_subharmonic</span> <span class="o">*</span> <span class="n">target_period</span>
+        <span class="n">ts</span> <span class="o">=</span> <span class="n">tg</span> <span class="o">*</span> <span class="n">target_period</span> <span class="o">+</span> <span class="n">t0</span>
+        <span class="n">saveat</span> <span class="o">=</span> <span class="n">SaveAt</span><span class="p">(</span><span class="n">ts</span><span class="o">=</span><span class="n">ts</span><span class="p">)</span>
+        <span class="n">sol</span> <span class="o">=</span> <span class="n">diffeqsolve</span><span class="p">(</span>
+            <span class="n">term</span><span class="p">,</span>
+            <span class="n">finder</span><span class="o">.</span><span class="n">solver</span><span class="p">,</span>
+            <span class="n">t0</span><span class="p">,</span>
+            <span class="n">t1</span><span class="p">,</span>
+            <span class="n">finder_config</span><span class="o">.</span><span class="n">init_time_step</span><span class="p">,</span>
+            <span class="n">final_conditions</span><span class="p">,</span>
+            <span class="n">saveat</span><span class="o">=</span><span class="n">saveat</span><span class="p">,</span>
+            <span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">stepsize_controller</span><span class="o">=</span><span class="n">finder</span><span class="o">.</span><span class="n">controller</span><span class="p">,</span>
+            <span class="n">max_steps</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="n">solution</span> <span class="o">=</span> <span class="n">AttractorFinderSolution</span><span class="p">(</span>
+            <span class="n">attractors</span><span class="o">=</span><span class="n">sol</span><span class="o">.</span><span class="n">ys</span><span class="p">,</span>
+            <span class="n">detected_subharmonic</span><span class="o">=</span><span class="n">detected_subharmonic</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span>
+                <span class="n">max_subharmonic</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span>
+            <span class="p">),</span>
+            <span class="n">subharmonic_residual</span><span class="o">=</span><span class="n">subharmonic_residual</span>
+            <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">max_subharmonic</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">),</span>
+            <span class="n">minimum_residual</span><span class="o">=</span><span class="n">min_residual</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">max_subharmonic</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">),</span>
+            <span class="n">simulated_periods</span><span class="o">=</span><span class="n">simulated_periods</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">max_subharmonic</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">),</span>
+            <span class="n">simulated_time</span><span class="o">=</span><span class="n">simulated_time</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">max_subharmonic</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">),</span>
+            <span class="n">converged</span><span class="o">=</span><span class="p">(</span><span class="n">final_flag</span> <span class="o">==</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">max_subharmonic</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">),</span>
+            <span class="n">final_flag</span><span class="o">=</span><span class="n">final_flag</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">max_subharmonic</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">),</span>
+            <span class="n">simulated_iterations</span><span class="o">=</span><span class="n">iterations</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">max_subharmonic</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">),</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">problem</span><span class="p">,</span> <span class="n">finder_config</span><span class="p">,</span> <span class="n">init_conditions</span><span class="p">,</span> <span class="n">solution</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="post_process_attractor_finder_results">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.post_process_attractor_finder_results">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">post_process_attractor_finder_results</span><span class="p">(</span>
+    <span class="n">problem_class</span><span class="p">:</span> <span class="n">ProblemDefinition</span><span class="p">,</span>
+    <span class="n">problems</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+    <span class="n">finder_configs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+    <span class="n">init_conditions</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
+    <span class="n">solutions</span><span class="p">:</span> <span class="n">AttractorFinderSolution</span><span class="p">,</span>
+    <span class="n">target_subharmonics</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
+    <span class="n">solution_state_labels</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Flatten batched attractor-finder outputs to one balanced result table.</span>
+
+<span class="sd">    The returned table contains one row per retained attractor sample. For a</span>
+<span class="sd">    detected subharmonic `Hk`, only the first `k` attractor rows are kept per</span>
+<span class="sd">    simulation so different simulations can be compared with a consistent layout.</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    &gt;&gt;&gt; import jax.numpy as jnp</span>
+<span class="sd">    &gt;&gt;&gt; from diffrax import PIDController, Tsit5</span>
+<span class="sd">    &gt;&gt;&gt; from kinamax.integration.models import H46Problem</span>
+<span class="sd">    &gt;&gt;&gt; problem = H46Problem.Params(fd=jnp.array(50.0), Ad=jnp.array(2.5))</span>
+<span class="sd">    &gt;&gt;&gt; x0 = jnp.array([0.0, 0.0, 0.0])</span>
+<span class="sd">    &gt;&gt;&gt; finder = AttractorFinder.Params(</span>
+<span class="sd">    ...     residuals_per_period=20,</span>
+<span class="sd">    ...     targetted_subharmonics=jnp.array([1, 2, 3, 5]),</span>
+<span class="sd">    ...     max_periods=2000,</span>
+<span class="sd">    ...     controller=PIDController(rtol=1e-8, atol=1e-9),</span>
+<span class="sd">    ...     solver=Tsit5(),</span>
+<span class="sd">    ... )</span>
+<span class="sd">    &gt;&gt;&gt; config = AttractorFinderConfig(</span>
+<span class="sd">    ...     target_frequency=50.0,</span>
+<span class="sd">    ...     init_time=0.0,</span>
+<span class="sd">    ...     init_time_step=1.0e-3,</span>
+<span class="sd">    ...     convergence_tol=1.0e-10,</span>
+<span class="sd">    ...     subharmonic_factor=10.0,</span>
+<span class="sd">    ... )</span>
+<span class="sd">    &gt;&gt;&gt; problem, config, x0, solution = AttractorFinder.find_attractors(</span>
+<span class="sd">    ...     finder, H46Problem, problem, x0, config</span>
+<span class="sd">    ... )</span>
+<span class="sd">    &gt;&gt;&gt; table = post_process_attractor_finder_results(</span>
+<span class="sd">    ...     problem_class=H46Problem,</span>
+<span class="sd">    ...     problems=problem,</span>
+<span class="sd">    ...     finder_configs=config,</span>
+<span class="sd">    ...     init_conditions=x0,</span>
+<span class="sd">    ...     solutions=solution,</span>
+<span class="sd">    ...     target_subharmonics=jnp.array([1, 2, 3, 5]),</span>
+<span class="sd">    ...     solution_state_labels=[&quot;xa&quot;, &quot;dotxa&quot;, &quot;Eha&quot;],</span>
+<span class="sd">    ... )</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">state_vector_labels</span> <span class="o">=</span> <span class="n">get_problem_state_vector_labels</span><span class="p">(</span><span class="n">problem_class</span><span class="p">)</span>
+    <span class="n">state_space_dim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">state_vector_labels</span><span class="p">)</span>
+    <span class="n">flattened_init</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">init_conditions</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">state_space_dim</span><span class="p">)</span>
+    <span class="n">max_attractors</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">target_subharmonics</span><span class="p">)))</span>
+
+    <span class="n">df_init_conditions</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
+        <span class="p">{</span>
+            <span class="n">k</span><span class="p">:</span> <span class="n">flattened_init</span><span class="p">[:,</span> <span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">max_attractors</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">state_vector_labels</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">)</span>
+
+    <span class="n">raw_data</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span>
+        <span class="p">[</span>
+            <span class="n">_object_to_polars</span><span class="p">(</span><span class="n">problems</span><span class="p">,</span> <span class="n">repeat</span><span class="o">=</span><span class="n">max_attractors</span><span class="p">),</span>
+            <span class="n">_object_to_polars</span><span class="p">(</span><span class="n">finder_configs</span><span class="p">,</span> <span class="n">repeat</span><span class="o">=</span><span class="n">max_attractors</span><span class="p">),</span>
+            <span class="n">df_init_conditions</span><span class="p">,</span>
+            <span class="n">solutions</span><span class="o">.</span><span class="n">as_polars</span><span class="p">(</span><span class="n">state_vector_labels</span><span class="o">=</span><span class="n">solution_state_labels</span><span class="p">),</span>
+        <span class="p">],</span>
+        <span class="n">how</span><span class="o">=</span><span class="s2">&quot;horizontal&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">balanced</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">unique_subharmonics</span> <span class="o">=</span> <span class="n">raw_data</span><span class="p">[</span><span class="s2">&quot;detected_subharmonic&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">unique</span><span class="p">()</span>
+    <span class="n">max_detected</span> <span class="o">=</span> <span class="n">unique_subharmonics</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">sh</span> <span class="ow">in</span> <span class="n">unique_subharmonics</span><span class="p">:</span>
+        <span class="n">group</span> <span class="o">=</span> <span class="n">raw_data</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;detected_subharmonic&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">sh</span><span class="p">)</span>
+        <span class="n">limit</span> <span class="o">=</span> <span class="n">sh</span> <span class="k">if</span> <span class="n">sh</span> <span class="o">!=</span> <span class="mi">0</span> <span class="k">else</span> <span class="n">max_detected</span>
+        <span class="n">balanced</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">group</span><span class="o">.</span><span class="n">group_by</span><span class="p">(</span><span class="s2">&quot;sim_label&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="n">limit</span><span class="p">))</span>
+
+    <span class="k">return</span> <span class="n">pl</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span><span class="n">balanced</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;vertical&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">sort</span><span class="p">([</span><span class="s2">&quot;sim_label&quot;</span><span class="p">,</span> <span class="s2">&quot;attractor_label&quot;</span><span class="p">])</span></div>
+
+
+
+<div class="viewcode-block" id="cluster_points">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.cluster_points">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">cluster_points</span><span class="p">(</span>
+    <span class="n">points</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
+    <span class="n">weights</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
+    <span class="n">distance_threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.01</span><span class="p">,</span>
+    <span class="n">method</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;dbscan&quot;</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Cluster weighted points and return labels with centroids in original space.&quot;&quot;&quot;</span>
+    <span class="n">points_array</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">points</span><span class="p">)</span>
+    <span class="n">weights_array</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">weights</span><span class="p">)</span>
+    <span class="n">supported_methods</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;dbscan&quot;</span><span class="p">,</span> <span class="s2">&quot;dbscan_cuml&quot;</span><span class="p">,</span> <span class="s2">&quot;agglomerative-clustering&quot;</span><span class="p">}</span>
+    <span class="k">if</span> <span class="n">method</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">supported_methods</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Unknown clustering method </span><span class="si">{</span><span class="n">method</span><span class="si">!r}</span><span class="s2">. Expected one of </span><span class="si">{</span><span class="n">supported_methods</span><span class="si">}</span><span class="s2">.&quot;</span>
+        <span class="p">)</span>
+
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">points_array</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">centroids</span> <span class="o">=</span> <span class="n">points_array</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="k">return</span> <span class="mi">1</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">),</span> <span class="n">centroids</span>
+
+    <span class="n">scaled_points</span> <span class="o">=</span> <span class="n">points_array</span> <span class="o">*</span> <span class="n">weights_array</span>
+    <span class="k">if</span> <span class="n">method</span> <span class="o">==</span> <span class="s2">&quot;agglomerative-clustering&quot;</span><span class="p">:</span>
+        <span class="n">db</span> <span class="o">=</span> <span class="n">AgglomerativeClustering</span><span class="p">(</span>
+            <span class="n">distance_threshold</span><span class="o">=</span><span class="n">distance_threshold</span><span class="p">,</span>
+            <span class="n">n_clusters</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">linkage</span><span class="o">=</span><span class="s2">&quot;ward&quot;</span><span class="p">,</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">scaled_points</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">method</span> <span class="o">==</span> <span class="s2">&quot;dbscan&quot;</span><span class="p">:</span>
+        <span class="n">db</span> <span class="o">=</span> <span class="n">DBSCAN</span><span class="p">(</span><span class="n">eps</span><span class="o">=</span><span class="n">distance_threshold</span><span class="p">,</span> <span class="n">min_samples</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">scaled_points</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">cuml</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span>
+                <span class="s2">&quot;method=&#39;dbscan_cuml&#39; requires cuML to be installed and importable.&quot;</span>
+            <span class="p">)</span>
+        <span class="n">db</span> <span class="o">=</span> <span class="n">cuml</span><span class="o">.</span><span class="n">DBSCAN</span><span class="p">(</span><span class="n">eps</span><span class="o">=</span><span class="n">distance_threshold</span><span class="p">,</span> <span class="n">min_samples</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">scaled_points</span><span class="p">)</span>
+
+    <span class="n">labels</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">db</span><span class="o">.</span><span class="n">labels_</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+    <span class="n">nclusters</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">labels</span><span class="p">)</span><span class="o">.</span><span class="n">size</span>
+    <span class="n">centroids</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+        <span class="p">[</span>
+            <span class="n">points_array</span><span class="p">[</span><span class="n">labels</span> <span class="o">==</span> <span class="n">cluster_id</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">cluster_id</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nclusters</span><span class="p">)</span>
+        <span class="p">]</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">nclusters</span><span class="p">,</span> <span class="n">labels</span><span class="p">,</span> <span class="n">centroids</span></div>
+
+
+
+<div class="viewcode-block" id="detect_orbits">
+<a class="viewcode-back" href="../../../api/core.html#kinamax.integration.core.detect_orbits">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">detect_orbits</span><span class="p">(</span>
+    <span class="n">problem_class</span><span class="p">:</span> <span class="n">ProblemDefinition</span><span class="p">,</span>
+    <span class="n">simulations</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">ode_params_labels</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">attractor_state_vec_labels</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">state_vec_labels</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">distance_threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.01</span><span class="p">,</span>
+    <span class="n">clustering_method</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;dbscan&quot;</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Cluster attractor samples per configuration and map them to orbit IDs.</span>
+
+<span class="sd">    Workflow:</span>
+
+<span class="sd">    1. Group rows by ODE parameters, detected subharmonic, and target frequency</span>
+<span class="sd">       so each configuration is processed independently.</span>
+<span class="sd">    2. Cluster the recorded attractor points in the weighted state space to</span>
+<span class="sd">       estimate unique attractors for the group.</span>
+<span class="sd">    3. Assign globally unique attractor labels and record which simulations</span>
+<span class="sd">       share the same attractor tuple (one orbit).</span>
+<span class="sd">    4. Return tidy Polars DataFrames for attractors and the simulation-&gt;orbit map.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">canonicalize_cluster_sequence</span><span class="p">(</span><span class="n">sequence</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Rotate a sequence so the smallest label appears first (orbit invariant).&quot;&quot;&quot;</span>
+        <span class="n">sequence</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">sequence</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">sequence</span><span class="o">.</span><span class="n">size</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">return</span> <span class="nb">tuple</span><span class="p">()</span>
+        <span class="n">rotation</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">argmin</span><span class="p">(</span><span class="n">sequence</span><span class="p">))</span>
+        <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">roll</span><span class="p">(</span><span class="n">sequence</span><span class="p">,</span> <span class="o">-</span><span class="n">rotation</span><span class="p">))</span>
+
+    <span class="n">next_attractor_label</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">ode_params_labels</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">ode_params_labels</span><span class="p">)</span>
+    <span class="n">attractor_state_vec_labels</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">attractor_state_vec_labels</span><span class="p">)</span>
+    <span class="n">state_vec_labels</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">state_vec_labels</span><span class="p">)</span>
+    <span class="n">group_labels</span> <span class="o">=</span> <span class="n">ode_params_labels</span> <span class="o">+</span> <span class="p">[</span><span class="s2">&quot;detected_subharmonic&quot;</span><span class="p">,</span> <span class="s2">&quot;target_frequency&quot;</span><span class="p">]</span>
+    <span class="n">attractor_columns</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">state_vec_labels</span>
+        <span class="o">+</span> <span class="n">ode_params_labels</span>
+        <span class="o">+</span> <span class="p">[</span>
+            <span class="s2">&quot;detected_subharmonic&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;attractor_label&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;orbit_label&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;target_frequency&quot;</span><span class="p">,</span>
+        <span class="p">]</span>
+    <span class="p">)</span>
+    <span class="n">attractors</span> <span class="o">=</span> <span class="p">{</span><span class="n">col</span><span class="p">:</span> <span class="p">[]</span> <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">attractor_columns</span><span class="p">}</span>
+    <span class="n">sim_to_attractor_tuple</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">attractor_tuple_to_sims</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">keys</span><span class="p">,</span> <span class="n">group</span> <span class="ow">in</span> <span class="n">simulations</span><span class="o">.</span><span class="n">group_by</span><span class="p">(</span><span class="n">group_labels</span><span class="p">):</span>
+        <span class="n">params</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">group_labels</span><span class="p">,</span> <span class="n">keys</span><span class="p">))</span>
+        <span class="n">sh</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">params</span><span class="p">[</span><span class="s2">&quot;detected_subharmonic&quot;</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">sh</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">group</span><span class="o">.</span><span class="n">height</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">continue</span>
+
+        <span class="n">group</span> <span class="o">=</span> <span class="n">group</span><span class="o">.</span><span class="n">sort</span><span class="p">([</span><span class="s2">&quot;sim_label&quot;</span><span class="p">,</span> <span class="s2">&quot;attractor_label&quot;</span><span class="p">])</span>
+        <span class="n">points</span> <span class="o">=</span> <span class="n">group</span><span class="o">.</span><span class="n">select</span><span class="p">(</span><span class="n">attractor_state_vec_labels</span><span class="p">)</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span>
+        <span class="n">problem</span> <span class="o">=</span> <span class="n">instantiate_problem</span><span class="p">(</span>
+            <span class="n">problem_class</span><span class="p">,</span> <span class="o">**</span><span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">params</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">ode_params_labels</span><span class="p">}</span>
+        <span class="p">)</span>
+        <span class="n">weights</span> <span class="o">=</span> <span class="n">get_problem_state_weights</span><span class="p">(</span><span class="n">problem</span><span class="p">,</span> <span class="n">problem_class</span><span class="p">)</span>
+        <span class="n">nclusters</span><span class="p">,</span> <span class="n">labels</span><span class="p">,</span> <span class="n">centroids</span> <span class="o">=</span> <span class="n">cluster_points</span><span class="p">(</span>
+            <span class="n">points</span><span class="p">,</span>
+            <span class="n">weights</span><span class="p">,</span>
+            <span class="n">distance_threshold</span><span class="o">=</span><span class="n">distance_threshold</span><span class="p">,</span>
+            <span class="n">method</span><span class="o">=</span><span class="n">clustering_method</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="n">labels</span> <span class="o">=</span> <span class="n">labels</span> <span class="o">+</span> <span class="n">next_attractor_label</span>
+        <span class="n">attractor_labels</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">nclusters</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">)</span> <span class="o">+</span> <span class="n">next_attractor_label</span>
+
+        <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">centroid</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">attractor_labels</span><span class="p">,</span> <span class="n">centroids</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">ode_params_labels</span><span class="p">:</span>
+                <span class="n">attractors</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">params</span><span class="p">[</span><span class="n">k</span><span class="p">])</span>
+            <span class="k">for</span> <span class="n">value</span><span class="p">,</span> <span class="n">state_label</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">centroid</span><span class="p">,</span> <span class="n">state_vec_labels</span><span class="p">):</span>
+                <span class="n">attractors</span><span class="p">[</span><span class="n">state_label</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+            <span class="n">attractors</span><span class="p">[</span><span class="s2">&quot;detected_subharmonic&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">sh</span><span class="p">)</span>
+            <span class="n">attractors</span><span class="p">[</span><span class="s2">&quot;attractor_label&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">label</span><span class="p">))</span>
+            <span class="n">attractors</span><span class="p">[</span><span class="s2">&quot;target_frequency&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">params</span><span class="p">[</span><span class="s2">&quot;target_frequency&quot;</span><span class="p">])</span>
+
+        <span class="n">next_attractor_label</span> <span class="o">+=</span> <span class="n">nclusters</span>
+
+        <span class="n">sim_labels</span> <span class="o">=</span> <span class="n">group</span><span class="p">[</span><span class="s2">&quot;sim_label&quot;</span><span class="p">][::</span><span class="n">sh</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span>
+        <span class="n">label_sequences</span> <span class="o">=</span> <span class="n">labels</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">sh</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">sim_label</span><span class="p">,</span> <span class="n">sequence</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">sim_labels</span><span class="p">,</span> <span class="n">label_sequences</span><span class="p">):</span>
+            <span class="n">canonical</span> <span class="o">=</span> <span class="n">canonicalize_cluster_sequence</span><span class="p">(</span><span class="n">sequence</span><span class="p">)</span>
+            <span class="n">sim_to_attractor_tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">sim_label</span><span class="p">)]</span> <span class="o">=</span> <span class="n">canonical</span>
+            <span class="n">attractor_tuple_to_sims</span><span class="p">[</span><span class="n">canonical</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">sim_label</span><span class="p">))</span>
+
+    <span class="n">orbit_attractor_map</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="n">orbit_id</span><span class="p">:</span> <span class="n">attractor_tuple</span>
+        <span class="k">for</span> <span class="n">orbit_id</span><span class="p">,</span> <span class="n">attractor_tuple</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">attractor_tuple_to_sims</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+    <span class="p">}</span>
+    <span class="n">orbit_id_lookup</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="n">tuple_</span><span class="p">:</span> <span class="n">orbit_id</span> <span class="k">for</span> <span class="n">orbit_id</span><span class="p">,</span> <span class="n">tuple_</span> <span class="ow">in</span> <span class="n">orbit_attractor_map</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="n">attractor_to_orbit</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="n">attractor_label</span><span class="p">:</span> <span class="n">orbit_id</span>
+        <span class="k">for</span> <span class="n">orbit_id</span><span class="p">,</span> <span class="n">attractor_tuple</span> <span class="ow">in</span> <span class="n">orbit_attractor_map</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">attractor_label</span> <span class="ow">in</span> <span class="n">attractor_tuple</span>
+    <span class="p">}</span>
+    <span class="n">attractors</span><span class="p">[</span><span class="s2">&quot;orbit_label&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span>
+        <span class="n">attractor_to_orbit</span><span class="p">[</span><span class="n">aid</span><span class="p">]</span> <span class="k">for</span> <span class="n">aid</span> <span class="ow">in</span> <span class="n">attractors</span><span class="p">[</span><span class="s2">&quot;attractor_label&quot;</span><span class="p">]</span>
+    <span class="p">)</span>
+
+    <span class="n">sim_orbit_df</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;sim_label&quot;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">sim_to_attractor_tuple</span><span class="o">.</span><span class="n">keys</span><span class="p">()),</span>
+            <span class="s2">&quot;orbit_label&quot;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="n">orbit_id_lookup</span><span class="p">[</span><span class="n">tuple_</span><span class="p">]</span> <span class="k">for</span> <span class="n">tuple_</span> <span class="ow">in</span> <span class="n">sim_to_attractor_tuple</span><span class="o">.</span><span class="n">values</span><span class="p">()</span>
+            <span class="p">],</span>
+        <span class="p">}</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="s2">&quot;sim_label&quot;</span><span class="p">)</span>
+    <span class="n">attractors_df</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">attractors</span><span class="p">)</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="s2">&quot;attractor_label&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">attractors_df</span><span class="p">,</span> <span class="n">sim_orbit_df</span></div>
+
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">kinamax</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/index.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples/index.html">Examples</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ludovic Charleux, Cloé Léglise, Adrien Morel, and the kinamax contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

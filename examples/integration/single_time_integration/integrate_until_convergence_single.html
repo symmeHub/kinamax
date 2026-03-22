@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Single Time Integration Until Convergence &#8212; kinamax 0.1.0</title>
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css?v=8cd3d715" />
+    <script src="../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Batched time integration demo" href="../batched_time_integration/README.html" />
+    <link rel="prev" title="Integration Examples" href="../index.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section class="tex2jax_ignore mathjax_ignore" id="single-time-integration-until-convergence">
+<h1>Single Time Integration Until Convergence<a class="headerlink" href="#single-time-integration-until-convergence" title="Link to this heading">¶</a></h1>
+<p>This tutorial shows the smallest complete attractor-search workflow in
+<code class="docutils literal notranslate"><span class="pre">kinamax</span></code>.</p>
+<p>It mirrors the batched example, but restricts the computation to one problem
+instance and one initial condition:</p>
+<ul class="simple">
+<li><p>one driven oscillator, <code class="docutils literal notranslate"><span class="pre">kinamax.integration.models.H46Problem</span></code></p></li>
+<li><p>one drive frequency, <code class="docutils literal notranslate"><span class="pre">fd</span></code></p></li>
+<li><p>one initial state, <code class="docutils literal notranslate"><span class="pre">X0</span></code></p></li>
+</ul>
+<p>The goal is to make each moving part visible before introducing batching and
+orbit clustering.</p>
+<section id="what-the-script-does">
+<h2>What The Script Does<a class="headerlink" href="#what-the-script-does" title="Link to this heading">¶</a></h2>
+<p>The workflow has four stages:</p>
+<ol class="arabic simple">
+<li><p>define the physical problem and the attractor-finder settings,</p></li>
+<li><p>generate one initial condition,</p></li>
+<li><p>integrate until one candidate subharmonic satisfies the shooting residual
+tolerance,</p></li>
+<li><p>flatten the structured result into a table that is easy to inspect and save.</p></li>
+</ol>
+<p>Because this file uses Jupytext percent format, it remains a normal Python
+script while also behaving like a notebook in the documentation.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jax</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jax</span><span class="w"> </span><span class="kn">import</span> <span class="n">config</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">jax.numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">jnp</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">polars</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pl</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">diffrax</span><span class="w"> </span><span class="kn">import</span> <span class="n">PIDController</span><span class="p">,</span> <span class="n">Tsit5</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">kinamax.integration.core</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">AttractorFinder</span><span class="p">,</span>
+    <span class="n">AttractorFinderConfig</span><span class="p">,</span>
+    <span class="n">post_process_attractor_finder_results</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">kinamax.integration.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">H46Problem</span>
+
+<span class="n">config</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="s2">&quot;jax_enable_x64&quot;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>  <span class="c1"># Use double precision for improved accuracy</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="set-up-the-output-directory">
+<h2>Set Up The Output Directory<a class="headerlink" href="#set-up-the-output-directory" title="Link to this heading">¶</a></h2>
+<p>The example writes its results next to the source file so the generated
+parquet file stays attached to the tutorial.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">example_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span> <span class="k">if</span> <span class="s2">&quot;__file__&quot;</span> <span class="ow">in</span> <span class="nb">globals</span><span class="p">()</span> <span class="k">else</span> <span class="n">Path</span><span class="o">.</span><span class="n">cwd</span><span class="p">()</span>
+<span class="n">output_dir</span> <span class="o">=</span> <span class="n">example_dir</span> <span class="o">/</span> <span class="s2">&quot;outputs&quot;</span>
+<span class="n">output_dir</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="define-the-physical-problem">
+<h2>Define The Physical Problem<a class="headerlink" href="#define-the-physical-problem" title="Link to this heading">¶</a></h2>
+<p>In this first parameter block we choose the forcing frequency and instantiate
+one H46 oscillator. The problem namespace also exposes the state ordering,
+which is reused later when we format the output table.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">fd</span> <span class="o">=</span> <span class="mf">50.0</span>
+<span class="n">problem_class</span> <span class="o">=</span> <span class="n">H46Problem</span>
+<span class="n">state_vector_labels</span> <span class="o">=</span> <span class="n">problem_class</span><span class="o">.</span><span class="n">state_vector_labels</span>
+<span class="n">problem</span> <span class="o">=</span> <span class="n">H46Problem</span><span class="o">.</span><span class="n">Params</span><span class="p">(</span><span class="n">fd</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">fd</span><span class="p">),</span> <span class="n">Ad</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">2.5</span><span class="p">))</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="define-the-attractor-finder-settings">
+<h2>Define The Attractor-Finder Settings<a class="headerlink" href="#define-the-attractor-finder-settings" title="Link to this heading">¶</a></h2>
+<p>The attractor search has two levels of configuration:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">AttractorFinderConfig</span></code> controls the integration start time, initial time
+step, target frequency, and convergence threshold.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">AttractorFinder.Params</span></code> controls the overall shooting strategy:
+how many residual samples are used per period, which subharmonics are tested,
+and how much total integration effort is allowed.</p></li>
+</ul>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">finder_config</span> <span class="o">=</span> <span class="n">AttractorFinderConfig</span><span class="p">(</span>
+    <span class="n">convergence_tol</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">1.0e-10</span><span class="p">),</span>
+    <span class="n">target_frequency</span><span class="o">=</span><span class="n">fd</span><span class="p">,</span>
+    <span class="n">init_time</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">0.0</span><span class="p">),</span>
+    <span class="n">init_time_step</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">1.0e-3</span><span class="p">),</span>
+    <span class="n">subharmonic_factor</span><span class="o">=</span><span class="mf">10.0</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="n">solver</span> <span class="o">=</span> <span class="n">Tsit5</span><span class="p">()</span>
+<span class="n">controller</span> <span class="o">=</span> <span class="n">PIDController</span><span class="p">(</span><span class="n">rtol</span><span class="o">=</span><span class="mf">1e-8</span><span class="p">,</span> <span class="n">atol</span><span class="o">=</span><span class="mf">1e-9</span><span class="p">)</span>
+<span class="n">target_subharmonics</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">5</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">)</span>
+<span class="n">attractor_finder</span> <span class="o">=</span> <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">Params</span><span class="p">(</span>
+    <span class="n">residuals_per_period</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span> <span class="nb">int</span><span class="p">),</span>
+    <span class="n">targetted_subharmonics</span><span class="o">=</span><span class="n">target_subharmonics</span><span class="p">,</span>
+    <span class="n">max_periods</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span>
+    <span class="n">controller</span><span class="o">=</span><span class="n">controller</span><span class="p">,</span>
+    <span class="n">solver</span><span class="o">=</span><span class="n">solver</span><span class="p">,</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="generate-one-initial-condition">
+<h2>Generate One Initial Condition<a class="headerlink" href="#generate-one-initial-condition" title="Link to this heading">¶</a></h2>
+<p>The state is sampled in a box scaled by the characteristic displacement and
+velocity of the oscillator. The last state corresponds to cumulative energy,
+so it starts from zero.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">key</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">PRNGKey</span><span class="p">(</span><span class="mi">758493</span><span class="p">)</span>
+<span class="n">init_condition</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="p">(</span><span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">state_vector_labels</span><span class="p">),))</span> <span class="o">-</span> <span class="mf">0.5</span><span class="p">)</span>
+    <span class="o">*</span> <span class="mf">2.0</span>
+    <span class="o">*</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">5.0</span> <span class="o">*</span> <span class="n">problem</span><span class="o">.</span><span class="n">xw</span><span class="p">,</span> <span class="mf">10.0</span> <span class="o">*</span> <span class="n">problem</span><span class="o">.</span><span class="n">xw</span> <span class="o">*</span> <span class="n">problem</span><span class="o">.</span><span class="n">w0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">])</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="integrate-until-convergence">
+<h2>Integrate Until Convergence<a class="headerlink" href="#integrate-until-convergence" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">AttractorFinder.find_attractors(...)</span></code> returns the original inputs together
+with a structured solution object. The call is JIT-compiled here because even
+a single search performs repeated ODE solves internally.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">find_one</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">jit</span><span class="p">(</span>
+    <span class="k">lambda</span> <span class="n">p</span><span class="p">,</span> <span class="n">x0</span><span class="p">,</span> <span class="n">cfg</span><span class="p">:</span> <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">find_attractors</span><span class="p">(</span>
+        <span class="n">attractor_finder</span><span class="p">,</span> <span class="n">problem_class</span><span class="p">,</span> <span class="n">p</span><span class="p">,</span> <span class="n">x0</span><span class="p">,</span> <span class="n">cfg</span>
+    <span class="p">)</span>
+<span class="p">)</span>
+<span class="n">problem</span><span class="p">,</span> <span class="n">finder_config</span><span class="p">,</span> <span class="n">init_condition</span><span class="p">,</span> <span class="n">solution</span> <span class="o">=</span> <span class="n">find_one</span><span class="p">(</span>
+    <span class="n">problem</span><span class="p">,</span> <span class="n">init_condition</span><span class="p">,</span> <span class="n">finder_config</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="why-the-post-processing-step-matters">
+<h2>Why The Post-Processing Step Matters<a class="headerlink" href="#why-the-post-processing-step-matters" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">AttractorFinder.find_attractors(...)</span></code> returns structured arrays designed for
+computation. <code class="docutils literal notranslate"><span class="pre">post_process_attractor_finder_results(...)</span></code> converts that result
+into a tidy table with one row per detected attractor sample and with the
+problem/configuration metadata duplicated alongside it. That table is much
+easier to save, filter, plot, and compare across examples.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">processed</span> <span class="o">=</span> <span class="n">post_process_attractor_finder_results</span><span class="p">(</span>
+    <span class="n">problem_class</span><span class="o">=</span><span class="n">problem_class</span><span class="p">,</span>
+    <span class="n">problems</span><span class="o">=</span><span class="n">problem</span><span class="p">,</span>
+    <span class="n">finder_configs</span><span class="o">=</span><span class="n">finder_config</span><span class="p">,</span>
+    <span class="n">init_conditions</span><span class="o">=</span><span class="n">init_condition</span><span class="p">,</span>
+    <span class="n">solutions</span><span class="o">=</span><span class="n">solution</span><span class="p">,</span>
+    <span class="n">target_subharmonics</span><span class="o">=</span><span class="n">target_subharmonics</span><span class="p">,</span>
+    <span class="n">solution_state_labels</span><span class="o">=</span><span class="p">[</span><span class="n">lab</span> <span class="o">+</span> <span class="s2">&quot;a&quot;</span> <span class="k">for</span> <span class="n">lab</span> <span class="ow">in</span> <span class="n">state_vector_labels</span><span class="p">],</span>
+<span class="p">)</span>
+
+<span class="n">out_path</span> <span class="o">=</span> <span class="n">output_dir</span> <span class="o">/</span> <span class="s2">&quot;simulations.parquet&quot;</span>
+<span class="n">processed</span><span class="o">.</span><span class="n">write_parquet</span><span class="p">(</span><span class="n">out_path</span><span class="p">)</span>
+<span class="n">pl</span><span class="o">.</span><span class="n">Config</span><span class="o">.</span><span class="n">set_tbl_rows</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">processed</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Wrote: </span><span class="si">{</span><span class="n">out_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>shape: (3, 26)
+┌───────────┬────────┬──────┬───────┬───┬────────────────┬────────────┬────────────────┬───────────┐
+│ sim_label ┆ xw     ┆ fd   ┆ w0    ┆ … ┆ simulated_time ┆ final_flag ┆ simulated_iter ┆ converged │
+│ ---       ┆ ---    ┆ ---  ┆ ---   ┆   ┆ ---            ┆ ---        ┆ ations         ┆ ---       │
+│ f64       ┆ f32    ┆ f64  ┆ f32   ┆   ┆ f64            ┆ i64        ┆ ---            ┆ bool      │
+│           ┆        ┆      ┆       ┆   ┆                ┆            ┆ i64            ┆           │
+╞═══════════╪════════╪══════╪═══════╪═══╪════════════════╪════════════╪════════════════╪═══════════╡
+│ 0.0       ┆ 0.0005 ┆ 50.0 ┆ 121.0 ┆ … ┆ 17.0           ┆ 1          ┆ 85             ┆ true      │
+│ 0.0       ┆ 0.0005 ┆ 50.0 ┆ 121.0 ┆ … ┆ 17.0           ┆ 1          ┆ 85             ┆ true      │
+│ 0.0       ┆ 0.0005 ┆ 50.0 ┆ 121.0 ┆ … ┆ 17.0           ┆ 1          ┆ 85             ┆ true      │
+└───────────┴────────┴──────┴───────┴───┴────────────────┴────────────┴────────────────┴───────────┘
+Wrote: /Users/lcharleux/Documents/GitHub/kinamax/docs/examples/integration/single_time_integration/outputs/simulations.parquet
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">kinamax</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../../../api/index.html">API Reference</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../../index.html">Examples</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../index.html">Integration Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hbm/index.html">HBM Examples</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">Examples</a><ul>
+  <li><a href="../index.html">Integration Examples</a><ul>
+      <li>Previous: <a href="../index.html" title="previous chapter">Integration Examples</a></li>
+      <li>Next: <a href="../batched_time_integration/README.html" title="next chapter">Batched time integration demo</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ludovic Charleux, Cloé Léglise, Adrien Morel, and the kinamax contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../_sources/examples/integration/single_time_integration/integrate_until_convergence_single.py.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

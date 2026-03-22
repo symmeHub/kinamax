@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Step 3: Reconstruct One-Period Orbits From The Attractors &#8212; kinamax 0.1.0</title>
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css?v=8cd3d715" />
+    <script src="../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Step 4: Plot The Reconstructed Orbits" href="step04_plots.html" />
+    <link rel="prev" title="Step 2: Detect Orbits From The Converged Attractors" href="step02_detect_orbits.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section class="tex2jax_ignore mathjax_ignore" id="step-3-reconstruct-one-period-orbits-from-the-attractors">
+<h1>Step 3: Reconstruct One-Period Orbits From The Attractors<a class="headerlink" href="#step-3-reconstruct-one-period-orbits-from-the-attractors" title="Link to this heading">¶</a></h1>
+<p>This notebook starts from the orbit representatives produced in Step 2 and
+integrates one drive period from each attractor state.</p>
+<p>It writes:</p>
+<ul class="simple">
+<li><p>one parquet file per reconstructed orbit in <code class="docutils literal notranslate"><span class="pre">outputs/orbits_from_attractors/</span></code>,</p></li>
+<li><p>an updated <code class="docutils literal notranslate"><span class="pre">outputs/orbits.parquet</span></code>,</p></li>
+<li><p>a compact per-orbit summary in <code class="docutils literal notranslate"><span class="pre">outputs/orbit_data.parquet</span></code>.</p></li>
+</ul>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">NamedTuple</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jax</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">jax.numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">jnp</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">polars</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pl</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">diffrax</span><span class="w"> </span><span class="kn">import</span> <span class="n">ODETerm</span><span class="p">,</span> <span class="n">PIDController</span><span class="p">,</span> <span class="n">SaveAt</span><span class="p">,</span> <span class="n">Tsit5</span><span class="p">,</span> <span class="n">diffeqsolve</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">kinamax.integration.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">H46_EM_Problem</span>
+
+<span class="n">problem_class</span> <span class="o">=</span> <span class="n">H46_EM_Problem</span>
+</pre></div>
+</div>
+</div>
+</div>
+<section id="helper-to-reorder-simulations-by-orbit">
+<h2>Helper To Reorder Simulations By Orbit<a class="headerlink" href="#helper-to-reorder-simulations-by-orbit" title="Link to this heading">¶</a></h2>
+<p>Each detected attractor belongs to one orbit label. This helper reconstructs
+the matching simulation metadata in the same order as the attractor table so
+that parameters and initial times remain aligned.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">stack_simulations</span><span class="p">(</span><span class="n">orbits</span><span class="p">,</span> <span class="n">sim_orbit</span><span class="p">,</span> <span class="n">simulations</span><span class="p">):</span>
+    <span class="n">attractor_orbit_map</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span>
+        <span class="nb">zip</span><span class="p">(</span><span class="n">orbits</span><span class="p">[</span><span class="s2">&quot;attractor_label&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_list</span><span class="p">(),</span> <span class="n">orbits</span><span class="p">[</span><span class="s2">&quot;orbit_label&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_list</span><span class="p">())</span>
+    <span class="p">)</span>
+    <span class="n">orbit_to_sim</span> <span class="o">=</span> <span class="n">sim_orbit</span><span class="o">.</span><span class="n">group_by</span><span class="p">(</span><span class="s2">&quot;orbit_label&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">first</span><span class="p">()</span>
+    <span class="n">orbit_sim_map</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span>
+        <span class="nb">zip</span><span class="p">(</span><span class="n">orbit_to_sim</span><span class="p">[</span><span class="s2">&quot;orbit_label&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_list</span><span class="p">(),</span> <span class="n">orbit_to_sim</span><span class="p">[</span><span class="s2">&quot;sim_label&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_list</span><span class="p">())</span>
+    <span class="p">)</span>
+    <span class="n">attractor_sim_map</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">orbit_sim_map</span><span class="p">[</span><span class="n">v</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">attractor_orbit_map</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+
+    <span class="n">order_df</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sim_label&quot;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">attractor_sim_map</span><span class="o">.</span><span class="n">values</span><span class="p">())}</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">with_row_index</span><span class="p">(</span><span class="s2">&quot;order&quot;</span><span class="p">)</span>
+
+    <span class="n">unique_sims</span> <span class="o">=</span> <span class="n">simulations</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">subset</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;sim_label&quot;</span><span class="p">],</span> <span class="n">keep</span><span class="o">=</span><span class="s2">&quot;first&quot;</span><span class="p">)</span>
+
+    <span class="n">stacked</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">order_df</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">unique_sims</span><span class="p">,</span> <span class="n">on</span><span class="o">=</span><span class="s2">&quot;sim_label&quot;</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">)</span>
+        <span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="s2">&quot;order&quot;</span><span class="p">)</span>
+        <span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="s2">&quot;order&quot;</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">stacked</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="one-period-orbit-integrator">
+<h2>One-Period Orbit Integrator<a class="headerlink" href="#one-period-orbit-integrator" title="Link to this heading">¶</a></h2>
+<p>For each attractor state, the calculator integrates one forcing period and
+returns <code class="docutils literal notranslate"><span class="pre">samples_per_period</span></code> snapshots.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">OrbitCalculator</span><span class="p">(</span><span class="n">NamedTuple</span><span class="p">):</span>
+    <span class="n">samples_per_period</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mi">60</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">calculate_orbit</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">problem</span><span class="p">,</span> <span class="n">Xa</span><span class="p">,</span> <span class="n">init_time</span><span class="p">,</span> <span class="n">target_frequency</span><span class="p">,</span> <span class="n">init_time_step</span><span class="o">=</span><span class="mf">1e-4</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Calculate orbits from attractors.</span>
+<span class="sd">        Args:</span>
+<span class="sd">            Xa (jnp.ndarray): Attractor states.</span>
+<span class="sd">            init_time (jnp.ndarray): Initial times.</span>
+<span class="sd">            problem (H46Problem): Problem instance.</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            jnp.ndarray: Orbits.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">Ns</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">samples_per_period</span>
+        <span class="n">solver</span> <span class="o">=</span> <span class="n">Tsit5</span><span class="p">()</span>
+        <span class="n">controller</span> <span class="o">=</span> <span class="n">PIDController</span><span class="p">(</span><span class="n">rtol</span><span class="o">=</span><span class="mf">1e-8</span><span class="p">,</span> <span class="n">atol</span><span class="o">=</span><span class="mf">1e-9</span><span class="p">)</span>
+        <span class="n">term</span> <span class="o">=</span> <span class="n">ODETerm</span><span class="p">(</span><span class="n">problem</span><span class="o">.</span><span class="n">rhs</span><span class="p">)</span>
+        <span class="n">t0</span> <span class="o">=</span> <span class="n">init_time</span>
+        <span class="n">fd</span> <span class="o">=</span> <span class="n">target_frequency</span>
+        <span class="n">Td</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="n">fd</span>
+        <span class="n">t1</span> <span class="o">=</span> <span class="n">t0</span> <span class="o">+</span> <span class="n">Td</span>
+        <span class="n">dt0</span> <span class="o">=</span> <span class="n">init_time_step</span>
+        <span class="c1"># print(f&quot;Calculating orbit from t={t0} to t={t1} with dt0={dt0} and N={Ns}&quot; )</span>
+        <span class="n">tg</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">Ns</span><span class="p">))</span>
+        <span class="c1"># tg[0] = 0.</span>
+        <span class="c1"># tg[1] = 1.0</span>
+        <span class="n">ts</span> <span class="o">=</span> <span class="n">t0</span> <span class="o">+</span> <span class="n">tg</span> <span class="o">*</span> <span class="p">(</span><span class="n">Td</span> <span class="o">/</span> <span class="n">Ns</span><span class="p">)</span>
+        <span class="c1">#ts = ts.at[-1].set(t1)</span>
+        <span class="n">saveat</span> <span class="o">=</span> <span class="n">SaveAt</span><span class="p">(</span><span class="n">ts</span><span class="o">=</span><span class="n">ts</span><span class="p">)</span>
+        <span class="n">sol</span> <span class="o">=</span> <span class="n">diffeqsolve</span><span class="p">(</span>
+            <span class="n">term</span><span class="p">,</span>
+            <span class="n">solver</span><span class="p">,</span>
+            <span class="n">t0</span><span class="p">,</span>
+            <span class="n">t1</span><span class="p">,</span>
+            <span class="n">dt0</span><span class="p">,</span>
+            <span class="n">y0</span><span class="o">=</span><span class="n">Xa</span><span class="p">,</span>
+            <span class="n">saveat</span><span class="o">=</span><span class="n">saveat</span><span class="p">,</span>
+            <span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">stepsize_controller</span><span class="o">=</span><span class="n">controller</span><span class="p">,</span>
+            <span class="n">max_steps</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">sol</span><span class="o">.</span><span class="n">ys</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="load-the-outputs-of-the-previous-stages">
+<h2>Load The Outputs Of The Previous Stages<a class="headerlink" href="#load-the-outputs-of-the-previous-stages" title="Link to this heading">¶</a></h2>
+<p>This stage consumes the simulation table from Step 1 and the orbit metadata
+from Step 2.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">example_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span> <span class="k">if</span> <span class="s2">&quot;__file__&quot;</span> <span class="ow">in</span> <span class="nb">globals</span><span class="p">()</span> <span class="k">else</span> <span class="n">Path</span><span class="o">.</span><span class="n">cwd</span><span class="p">()</span>
+<span class="n">working_dir</span> <span class="o">=</span> <span class="n">example_dir</span> <span class="o">/</span> <span class="s2">&quot;outputs&quot;</span>
+
+<span class="n">simulations</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">working_dir</span> <span class="o">/</span> <span class="s2">&quot;simulations.parquet&quot;</span><span class="p">)</span>
+<span class="n">orbits</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">working_dir</span> <span class="o">/</span> <span class="s2">&quot;orbits.parquet&quot;</span><span class="p">)</span>
+<span class="n">sim_orbit</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">working_dir</span> <span class="o">/</span> <span class="s2">&quot;sim_orbit.parquet&quot;</span><span class="p">)</span>
+<span class="n">state_vec_labels</span> <span class="o">=</span> <span class="n">problem_class</span><span class="o">.</span><span class="n">state_vector_labels</span>
+<span class="n">attractor_state_vec_labels</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">a&quot;</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">state_vec_labels</span><span class="p">]</span>
+<span class="n">ode_params_labels</span> <span class="o">=</span> <span class="n">problem_class</span><span class="o">.</span><span class="n">params_labels</span>
+<span class="n">stacked_sims</span> <span class="o">=</span> <span class="n">stack_simulations</span><span class="p">(</span><span class="n">orbits</span><span class="p">,</span> <span class="n">sim_orbit</span><span class="p">,</span> <span class="n">simulations</span><span class="p">)</span>
+<span class="n">ode_params</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">stacked_sims</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">ode_params_labels</span><span class="p">}</span>
+<span class="n">target_frequencies</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">stacked_sims</span><span class="p">[</span><span class="s2">&quot;target_frequency&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())</span>
+<span class="n">init_times</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">stacked_sims</span><span class="p">[</span><span class="s2">&quot;init_time&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())</span>
+<span class="n">init_time_steps</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">stacked_sims</span><span class="p">[</span><span class="s2">&quot;init_time_step&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())</span>
+<span class="n">Xa</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">orbits</span><span class="p">[</span><span class="n">state_vec_labels</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())</span>
+
+<span class="n">problems</span> <span class="o">=</span> <span class="n">problem_class</span><span class="p">(</span><span class="o">**</span><span class="n">ode_params</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="integrate-one-period-from-every-attractor">
+<h2>Integrate One Period From Every Attractor<a class="headerlink" href="#integrate-one-period-from-every-attractor" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">vmap</span></code> applies the one-period integrator to every detected attractor while
+keeping the corresponding problem parameters aligned.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">calculator</span> <span class="o">=</span> <span class="n">OrbitCalculator</span><span class="p">(</span><span class="n">samples_per_period</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span>
+<span class="n">calculator_fn</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">jit</span><span class="p">(</span><span class="n">jax</span><span class="o">.</span><span class="n">vmap</span><span class="p">(</span><span class="n">calculator</span><span class="o">.</span><span class="n">calculate_orbit</span><span class="p">))</span>
+<span class="n">calculated_orbits</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+    <span class="n">calculator_fn</span><span class="p">(</span>
+        <span class="n">problems</span><span class="p">,</span>
+        <span class="n">Xa</span><span class="o">=</span><span class="n">Xa</span><span class="p">,</span>
+        <span class="n">init_time</span><span class="o">=</span><span class="n">init_times</span><span class="p">,</span>
+        <span class="n">target_frequency</span><span class="o">=</span><span class="n">target_frequencies</span><span class="p">,</span>
+        <span class="n">init_time_step</span><span class="o">=</span><span class="n">init_time_steps</span><span class="p">,</span>
+    <span class="p">)</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="write-one-file-per-orbit-and-update-the-summary-tables">
+<h2>Write One File Per Orbit And Update The Summary Tables<a class="headerlink" href="#write-one-file-per-orbit-and-update-the-summary-tables" title="Link to this heading">¶</a></h2>
+<p>The detailed trajectories are stored separately, while the aggregate orbit
+data are folded back into the main parquet tables.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">orbits_labels</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">orbits</span><span class="p">[</span><span class="s2">&quot;orbit_label&quot;</span><span class="p">])</span>
+<span class="n">attractors_labels</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">orbits</span><span class="p">[</span><span class="s2">&quot;attractor_label&quot;</span><span class="p">])</span>
+<span class="n">orbits_dir</span> <span class="o">=</span> <span class="n">working_dir</span> <span class="o">/</span> <span class="s2">&quot;orbits_from_attractors&quot;</span>
+<span class="n">orbits_dir</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="n">orbits_from_attractors</span> <span class="o">=</span> <span class="p">{}</span>
+<span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">calculated_orbits</span><span class="p">)):</span>
+    <span class="n">orbit_label</span> <span class="o">=</span> <span class="n">orbits_labels</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+    <span class="n">attractor_label</span> <span class="o">=</span> <span class="n">attractors_labels</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+    <span class="n">orbit_data</span> <span class="o">=</span> <span class="n">calculated_orbits</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+    <span class="n">orbit_df</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">from_numpy</span><span class="p">(</span><span class="n">orbit_data</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="n">state_vec_labels</span><span class="p">)</span>
+    <span class="n">orbits_from_attractors</span><span class="p">[(</span><span class="n">orbit_label</span><span class="p">,</span> <span class="n">attractor_label</span><span class="p">)]</span> <span class="o">=</span> <span class="n">orbit_df</span>
+    <span class="n">orbit_df</span><span class="o">.</span><span class="n">write_parquet</span><span class="p">(</span>
+        <span class="n">orbits_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;orbit_</span><span class="si">{</span><span class="n">orbit_label</span><span class="si">}</span><span class="s2">_attractor_</span><span class="si">{</span><span class="n">attractor_label</span><span class="si">}</span><span class="s2">.parquet&quot;</span>
+    <span class="p">)</span>
+
+<span class="n">dicts</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">{</span><span class="s2">&quot;orbit_label&quot;</span><span class="p">:</span> <span class="n">k</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s2">&quot;attractor_label&quot;</span><span class="p">:</span> <span class="n">k</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="s2">&quot;Eh&quot;</span><span class="p">:</span> <span class="n">v</span><span class="o">.</span><span class="n">item</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;Eh&quot;</span><span class="p">)}</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span> <span class="ow">in</span> <span class="n">orbits_from_attractors</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+<span class="p">]</span>
+
+<span class="n">energy_per_period</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">from_dicts</span><span class="p">(</span><span class="n">dicts</span><span class="p">)</span>
+<span class="n">orbits</span> <span class="o">=</span> <span class="n">orbits</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="s2">&quot;Eh&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+    <span class="n">energy_per_period</span><span class="p">,</span> <span class="n">on</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;orbit_label&quot;</span><span class="p">,</span> <span class="s2">&quot;attractor_label&quot;</span><span class="p">],</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;right&quot;</span>
+<span class="p">)</span>
+
+<span class="n">orbits</span><span class="o">.</span><span class="n">write_parquet</span><span class="p">(</span><span class="n">working_dir</span> <span class="o">/</span> <span class="s2">&quot;orbits.parquet&quot;</span><span class="p">)</span>
+
+
+<span class="n">unique_orbits</span> <span class="o">=</span> <span class="n">orbits</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">subset</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;orbit_label&quot;</span><span class="p">],</span> <span class="n">keep</span><span class="o">=</span><span class="s2">&quot;first&quot;</span><span class="p">)[</span>
+    <span class="s2">&quot;orbit_label&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;fd&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;detected_subharmonic&quot;</span><span class="p">,</span>
+<span class="p">]</span>
+<span class="n">orbit_energy</span> <span class="o">=</span> <span class="n">orbits</span><span class="p">[</span><span class="s2">&quot;orbit_label&quot;</span><span class="p">,</span> <span class="s2">&quot;Eh&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">group_by</span><span class="p">(</span><span class="s2">&quot;orbit_label&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+<span class="n">orbit_data</span> <span class="o">=</span> <span class="n">unique_orbits</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">orbit_energy</span><span class="p">,</span> <span class="n">on</span><span class="o">=</span><span class="s2">&quot;orbit_label&quot;</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;inner&quot;</span><span class="p">)</span>
+<span class="n">orbit_data</span> <span class="o">=</span> <span class="n">orbit_data</span><span class="o">.</span><span class="n">with_columns</span><span class="p">((</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;Eh&quot;</span><span class="p">)</span> <span class="o">*</span> <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;fd&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">alias</span><span class="p">(</span><span class="s2">&quot;Ph&quot;</span><span class="p">))</span>
+<span class="n">orbit_data</span><span class="o">.</span><span class="n">write_parquet</span><span class="p">(</span><span class="n">working_dir</span> <span class="o">/</span> <span class="s2">&quot;orbit_data.parquet&quot;</span><span class="p">)</span>
+
+<span class="n">orbit_data</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output text_html"><div><style>
+.dataframe > thead > tr,
+.dataframe > tbody > tr {
+  text-align: right;
+  white-space: pre-wrap;
+}
+</style>
+<small>shape: (34, 5)</small><table border="1" class="dataframe"><thead><tr><th>orbit_label</th><th>fd</th><th>detected_subharmonic</th><th>Eh</th><th>Ph</th></tr><tr><td>i64</td><td>f64</td><td>i64</td><td>f64</td><td>f64</td></tr></thead><tbody><tr><td>20</td><td>23.0</td><td>1</td><td>0.000009</td><td>0.000196</td></tr><tr><td>25</td><td>32.0</td><td>2</td><td>0.000002</td><td>0.000056</td></tr><tr><td>7</td><td>41.0</td><td>3</td><td>8.3393e-7</td><td>0.000034</td></tr><tr><td>33</td><td>38.0</td><td>2</td><td>1.6732e-7</td><td>0.000006</td></tr><tr><td>32</td><td>20.0</td><td>1</td><td>0.000007</td><td>0.000134</td></tr><tr><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td><td>&hellip;</td></tr><tr><td>3</td><td>50.0</td><td>1</td><td>6.5373e-9</td><td>3.2687e-7</td></tr><tr><td>13</td><td>32.0</td><td>3</td><td>5.5161e-7</td><td>0.000018</td></tr><tr><td>31</td><td>32.0</td><td>1</td><td>0.000017</td><td>0.000547</td></tr><tr><td>24</td><td>32.0</td><td>2</td><td>0.000002</td><td>0.000056</td></tr><tr><td>19</td><td>44.0</td><td>1</td><td>0.000038</td><td>0.001669</td></tr></tbody></table></div></div></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">kinamax</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../../../api/index.html">API Reference</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../../index.html">Examples</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../index.html">Integration Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../hbm/index.html">HBM Examples</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">Examples</a><ul>
+  <li><a href="../index.html">Integration Examples</a><ul>
+  <li><a href="README.html">Batched time integration demo</a><ul>
+      <li>Previous: <a href="step02_detect_orbits.html" title="previous chapter">Step 2: Detect Orbits From The Converged Attractors</a></li>
+      <li>Next: <a href="step04_plots.html" title="next chapter">Step 4: Plot The Reconstructed Orbits</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ludovic Charleux, Cloé Léglise, Adrien Morel, and the kinamax contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../_sources/examples/integration/batched_time_integration/step03_calculate_orbits.py.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

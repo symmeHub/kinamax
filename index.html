@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Kinamax &#8212; kinamax 0.1.0</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="_static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css?v=8cd3d715" />
+    <script src="_static/documentation_options.js?v=01f34227"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="API Reference" href="api/index.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section class="tex2jax_ignore mathjax_ignore" id="kinamax">
+<h1>Kinamax<a class="headerlink" href="#kinamax" title="Link to this heading">¶</a></h1>
+<p><code class="docutils literal notranslate"><span class="pre">kinamax</span></code> is a JAX/Diffrax toolkit for exploring periodic and subharmonic
+responses of nonlinear driven ODEs.</p>
+<p>The documentation is built with Sphinx and MyST, so the pages are written in
+Markdown while still supporting API autodocumentation.</p>
+<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/index.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/core.html"><code class="docutils literal notranslate"><span class="pre">kinamax.integration.core</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/problems.html"><code class="docutils literal notranslate"><span class="pre">kinamax.integration.models</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/hbm.html"><code class="docutils literal notranslate"><span class="pre">kinamax.hbm</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="examples/index.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="examples/integration/index.html">Integration Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/hbm/index.html">HBM Examples</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<section id="what-is-in-the-package">
+<h2>What is in the package<a class="headerlink" href="#what-is-in-the-package" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">kinamax.integration.core</span></code> contains the attractor search, clustering, and
+post-processing utilities.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">kinamax.integration.models</span></code> contains data-oriented time-integration models
+such as <code class="docutils literal notranslate"><span class="pre">H46Problem</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">kinamax.hbm</span></code> contains harmonic-balance helpers for Fourier coefficient
+manipulations.</p></li>
+</ul>
+</section>
+<section id="install">
+<h2>Install<a class="headerlink" href="#install" title="Link to this heading">¶</a></h2>
+<p>Install the package in editable mode:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
+</pre></div>
+</div>
+<p>Install the documentation dependencies:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.<span class="o">[</span>docs<span class="o">]</span>
+</pre></div>
+</div>
+</section>
+<section id="build-the-docs">
+<h2>Build The Docs<a class="headerlink" href="#build-the-docs" title="Link to this heading">¶</a></h2>
+<p>From the repository root:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>make<span class="w"> </span>-C<span class="w"> </span>docs<span class="w"> </span>html
+</pre></div>
+</div>
+<p>The generated site is written to <code class="docutils literal notranslate"><span class="pre">docs/_build/html</span></code>.</p>
+</section>
+<section id="serve-the-docs-locally">
+<h2>Serve The Docs Locally<a class="headerlink" href="#serve-the-docs-locally" title="Link to this heading">¶</a></h2>
+<p>To avoid <code class="docutils literal notranslate"><span class="pre">file://</span></code> access issues in the browser, serve the generated site over
+HTTP:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>make<span class="w"> </span>-C<span class="w"> </span>docs<span class="w"> </span>html
+make<span class="w"> </span>-C<span class="w"> </span>docs<span class="w"> </span>serve
+</pre></div>
+</div>
+<p>By default the local site is available at <code class="docutils literal notranslate"><span class="pre">http://127.0.0.1:8000</span></code>.</p>
+<p>You can choose a different host or port:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>make<span class="w"> </span>-C<span class="w"> </span>docs<span class="w"> </span>serve<span class="w"> </span><span class="nv">HOST</span><span class="o">=</span><span class="m">127</span>.0.0.1<span class="w"> </span><span class="nv">PORT</span><span class="o">=</span><span class="m">8123</span>
+</pre></div>
+</div>
+</section>
+<section id="publish-the-docs">
+<h2>Publish The Docs<a class="headerlink" href="#publish-the-docs" title="Link to this heading">¶</a></h2>
+<p>The documentation website can be published locally to the <code class="docutils literal notranslate"><span class="pre">gh-pages</span></code> branch
+with <code class="docutils literal notranslate"><span class="pre">ghp-import</span></code>.</p>
+<p>To build and publish the current documentation:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>make<span class="w"> </span>-C<span class="w"> </span>docs<span class="w"> </span>publish
+</pre></div>
+</div>
+<p>Important:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">-C</span> <span class="pre">docs</span> <span class="pre">publish</span></code> rebuilds the documentation locally before publishing.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">-C</span> <span class="pre">docs</span> <span class="pre">publish</span></code> pushes the generated HTML from <code class="docutils literal notranslate"><span class="pre">docs/_build/html</span></code> to the
+<code class="docutils literal notranslate"><span class="pre">gh-pages</span></code> branch with <code class="docutils literal notranslate"><span class="pre">ghp-import</span></code>.</p></li>
+<li><p>GitHub Pages must be configured to publish from the <code class="docutils literal notranslate"><span class="pre">gh-pages</span></code> branch.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">ghp-import</span></code> command is installed with <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">-e</span> <span class="pre">.[docs]</span></code>.</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="#">kinamax</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/index.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="examples/index.html">Examples</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="#">Documentation overview</a><ul>
+      <li>Next: <a href="api/index.html" title="next chapter">API Reference</a></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ludovic Charleux, Cloé Léglise, Adrien Morel, and the kinamax contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="_sources/index.md.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>kinamax.integration.core &#8212; kinamax 0.1.0</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../_static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css?v=8cd3d715" />
+    <script src="../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="kinamax.integration.models" href="problems.html" />
+    <link rel="prev" title="API Reference" href="index.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section class="tex2jax_ignore mathjax_ignore" id="module-kinamax.integration.core">
+<span id="kinamax-integration-core"></span><h1><code class="docutils literal notranslate"><span class="pre">kinamax.integration.core</span></code><a class="headerlink" href="#module-kinamax.integration.core" title="Link to this heading">¶</a></h1>
+<p>Time-integration orbit-finding, clustering, and result post-processing utilities.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="kinamax.integration.core.Container">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">kinamax.integration.core.</span></span><span class="sig-name descname"><span class="pre">Container</span></span><a class="reference internal" href="../_modules/kinamax/integration/core.html#Container"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.Container" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Base container exposing NumPy/Polars export helpers for array-like fields.</p>
+<dl class="field-list simple">
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="kinamax.integration.core.Container.as_dict">
+<span class="sig-name descname"><span class="pre">as_dict</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">flatten</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#Container.as_dict"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.Container.as_dict" title="Link to this definition">¶</a></dt>
+<dd><p>Convert container fields to a NumPy-backed dictionary.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>flatten</strong> (<em>bool</em>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>dict[str, <em>ndarray</em>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="kinamax.integration.core.Container.as_polars">
+<span class="sig-name descname"><span class="pre">as_polars</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">repeat</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#Container.as_polars"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.Container.as_polars" title="Link to this definition">¶</a></dt>
+<dd><p>Convert the container to a Polars DataFrame.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>repeat</strong> (<em>int</em>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>DataFrame</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="kinamax.integration.core.namedtuple_repr">
+<span class="sig-prename descclassname"><span class="pre">kinamax.integration.core.</span></span><span class="sig-name descname"><span class="pre">namedtuple_repr</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">values</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#namedtuple_repr"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.namedtuple_repr" title="Link to this definition">¶</a></dt>
+<dd><p>Render a compact Polars-backed repr for NamedTuple-style containers.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<em>str</em>)</p></li>
+<li><p><strong>values</strong> (<em>Mapping</em><em>[</em><em>str</em><em>, </em><em>Any</em><em>]</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderConfig">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">kinamax.integration.core.</span></span><span class="sig-name descname"><span class="pre">AttractorFinderConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">init_time</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">Array(0.,</span> <span class="pre">dtype=float32)</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">init_time_step</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">Array(0.001,</span> <span class="pre">dtype=float32)</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">convergence_tol</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">Array(1.e-06,</span> <span class="pre">dtype=float32)</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">target_frequency</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">50.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subharmonic_factor</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">10.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#AttractorFinderConfig"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.AttractorFinderConfig" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">NamedTuple</span></code></p>
+<p>Configuration values driving the shooting-based attractor search.</p>
+<p class="rubric">Examples</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">config</span> <span class="o">=</span> <span class="n">AttractorFinderConfig</span><span class="p">(</span>
+<span class="gp">... </span>    <span class="n">target_frequency</span><span class="o">=</span><span class="mf">50.0</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">init_time</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">init_time_step</span><span class="o">=</span><span class="mf">1.0e-3</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">convergence_tol</span><span class="o">=</span><span class="mf">1.0e-10</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">subharmonic_factor</span><span class="o">=</span><span class="mf">10.0</span><span class="p">,</span>
+<span class="gp">... </span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+<span class="go">AttractorFinderConfig</span>
+<span class="go">...</span>
+<span class="go">│ init_time          ┆ scalar ┆ float64 ┆ 0.0...</span>
+<span class="go">│ init_time_step     ┆ scalar ┆ float64 ┆ 0.001...</span>
+<span class="go">│ convergence_tol    ┆ scalar ┆ float64 ┆ 1e-10...</span>
+<span class="go">│ target_frequency   ┆ scalar ┆ float64 ┆ 50.0...</span>
+<span class="go">│ subharmonic_factor ┆ scalar ┆ float64 ┆ 10.0...</span>
+<span class="go">...</span>
+</pre></div>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>init_time</strong> (<em>Array</em>)</p></li>
+<li><p><strong>init_time_step</strong> (<em>Array</em>)</p></li>
+<li><p><strong>convergence_tol</strong> (<em>Array</em>)</p></li>
+<li><p><strong>target_frequency</strong> (<em>float</em>)</p></li>
+<li><p><strong>subharmonic_factor</strong> (<em>float</em>)</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderConfig.init_time">
+<span class="sig-name descname"><span class="pre">init_time</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Array</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinderConfig.init_time" title="Link to this definition">¶</a></dt>
+<dd><p>Alias for field number 0</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderConfig.init_time_step">
+<span class="sig-name descname"><span class="pre">init_time_step</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Array</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinderConfig.init_time_step" title="Link to this definition">¶</a></dt>
+<dd><p>Alias for field number 1</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderConfig.convergence_tol">
+<span class="sig-name descname"><span class="pre">convergence_tol</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Array</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinderConfig.convergence_tol" title="Link to this definition">¶</a></dt>
+<dd><p>Alias for field number 2</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderConfig.target_frequency">
+<span class="sig-name descname"><span class="pre">target_frequency</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">float</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinderConfig.target_frequency" title="Link to this definition">¶</a></dt>
+<dd><p>Alias for field number 3</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderConfig.subharmonic_factor">
+<span class="sig-name descname"><span class="pre">subharmonic_factor</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">float</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinderConfig.subharmonic_factor" title="Link to this definition">¶</a></dt>
+<dd><p>Alias for field number 4</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="kinamax.integration.core.convert_subharmonics_flags">
+<span class="sig-prename descclassname"><span class="pre">kinamax.integration.core.</span></span><span class="sig-name descname"><span class="pre">convert_subharmonics_flags</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">subharmonics_flags</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">final_flags</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">targetted_subharmonics</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#convert_subharmonics_flags"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.convert_subharmonics_flags" title="Link to this definition">¶</a></dt>
+<dd><p>Collapse per-target boolean flags into detected subharmonic orders.</p>
+<p>For rows flagged as converged (<cite>final_flags == 1</cite>), the first active entry in
+<cite>subharmonics_flags</cite> selects the matching order from <cite>targetted_subharmonics</cite>.
+Rows without convergence keep value <cite>0</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>subharmonics_flags</strong> (<em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em>)</p></li>
+<li><p><strong>final_flags</strong> (<em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em>)</p></li>
+<li><p><strong>targetted_subharmonics</strong> (<em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>ndarray</em>[tuple[<em>Any</em>, …], <em>dtype</em>[<em>int32</em>]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderSolution">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">kinamax.integration.core.</span></span><span class="sig-name descname"><span class="pre">AttractorFinderSolution</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">attractors</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">detected_subharmonic</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subharmonic_residual</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">minimum_residual</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">simulated_periods</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">simulated_time</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">final_flag</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">simulated_iterations</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">converged</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#AttractorFinderSolution"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.AttractorFinderSolution" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#kinamax.integration.core.Container" title="kinamax.integration.core.Container"><code class="xref py py-class docutils literal notranslate"><span class="pre">Container</span></code></a></p>
+<p>Structured output produced by <cite>AttractorFinder.find_attractors</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>attractors</strong> (<em>Array</em>)</p></li>
+<li><p><strong>detected_subharmonic</strong> (<em>Array</em>)</p></li>
+<li><p><strong>subharmonic_residual</strong> (<em>Array</em>)</p></li>
+<li><p><strong>minimum_residual</strong> (<em>Array</em>)</p></li>
+<li><p><strong>simulated_periods</strong> (<em>Array</em>)</p></li>
+<li><p><strong>simulated_time</strong> (<em>Array</em>)</p></li>
+<li><p><strong>final_flag</strong> (<em>Array</em>)</p></li>
+<li><p><strong>simulated_iterations</strong> (<em>Array</em>)</p></li>
+<li><p><strong>converged</strong> (<em>Array</em>)</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderSolution.attractors">
+<span class="sig-name descname"><span class="pre">attractors</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Array</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinderSolution.attractors" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderSolution.detected_subharmonic">
+<span class="sig-name descname"><span class="pre">detected_subharmonic</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Array</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinderSolution.detected_subharmonic" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderSolution.subharmonic_residual">
+<span class="sig-name descname"><span class="pre">subharmonic_residual</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Array</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinderSolution.subharmonic_residual" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderSolution.minimum_residual">
+<span class="sig-name descname"><span class="pre">minimum_residual</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Array</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinderSolution.minimum_residual" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderSolution.simulated_periods">
+<span class="sig-name descname"><span class="pre">simulated_periods</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Array</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinderSolution.simulated_periods" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderSolution.simulated_time">
+<span class="sig-name descname"><span class="pre">simulated_time</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Array</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinderSolution.simulated_time" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderSolution.final_flag">
+<span class="sig-name descname"><span class="pre">final_flag</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Array</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinderSolution.final_flag" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderSolution.simulated_iterations">
+<span class="sig-name descname"><span class="pre">simulated_iterations</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Array</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinderSolution.simulated_iterations" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderSolution.converged">
+<span class="sig-name descname"><span class="pre">converged</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Array</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinderSolution.converged" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderSolution.as_dict">
+<span class="sig-name descname"><span class="pre">as_dict</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">state_vector_labels</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#AttractorFinderSolution.as_dict"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.AttractorFinderSolution.as_dict" title="Link to this definition">¶</a></dt>
+<dd><p>Flatten attractor-finder outputs to a tabular NumPy dictionary.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>state_vector_labels</strong> (<em>Sequence</em><em>[</em><em>str</em><em>] </em><em>| </em><em>None</em>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>dict[str, <em>ndarray</em>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderSolution.get_subharmonics">
+<span class="sig-name descname"><span class="pre">get_subharmonics</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#AttractorFinderSolution.get_subharmonics"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.AttractorFinderSolution.get_subharmonics" title="Link to this definition">¶</a></dt>
+<dd><p>Return the detected subharmonic order for each flattened attractor row.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><em>ndarray</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinderSolution.as_polars">
+<span class="sig-name descname"><span class="pre">as_polars</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">state_vector_labels</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#AttractorFinderSolution.as_polars"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.AttractorFinderSolution.as_polars" title="Link to this definition">¶</a></dt>
+<dd><p>Convert the solution object to a Polars DataFrame.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>state_vector_labels</strong> (<em>Sequence</em><em>[</em><em>str</em><em>] </em><em>| </em><em>None</em>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>DataFrame</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinder">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">kinamax.integration.core.</span></span><span class="sig-name descname"><span class="pre">AttractorFinder</span></span><a class="reference internal" href="../_modules/kinamax/integration/core.html#AttractorFinder"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.AttractorFinder" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Namespace holding attractor-finder data layouts and static helpers.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinder.Params">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">Params</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">residuals_per_period</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">10</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">targetted_subharmonics</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">array([1,</span> <span class="pre">3,</span> <span class="pre">5])</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_periods</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">controller</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">PIDController(rtol=1e-07,</span> <span class="pre">atol=1e-09)</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">solver</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">Tsit5()</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#AttractorFinder.Params"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.AttractorFinder.Params" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">NamedTuple</span></code></p>
+<p>Static settings for the shooting-based attractor search.</p>
+<p class="rubric">Examples</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">jax.numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">jnp</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">diffrax</span><span class="w"> </span><span class="kn">import</span> <span class="n">PIDController</span><span class="p">,</span> <span class="n">Tsit5</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">finder</span> <span class="o">=</span> <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">Params</span><span class="p">(</span>
+<span class="gp">... </span>    <span class="n">residuals_per_period</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">targetted_subharmonics</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">5</span><span class="p">]),</span>
+<span class="gp">... </span>    <span class="n">max_periods</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">controller</span><span class="o">=</span><span class="n">PIDController</span><span class="p">(</span><span class="n">rtol</span><span class="o">=</span><span class="mf">1e-8</span><span class="p">,</span> <span class="n">atol</span><span class="o">=</span><span class="mf">1e-9</span><span class="p">),</span>
+<span class="gp">... </span>    <span class="n">solver</span><span class="o">=</span><span class="n">Tsit5</span><span class="p">(),</span>
+<span class="gp">... </span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="n">finder</span><span class="p">)</span>
+<span class="go">AttractorFinder.Params</span>
+<span class="go">...</span>
+<span class="go">│ residuals_per_period   ┆ scalar ┆ int64         ┆ 20...</span>
+<span class="go">│ targetted_subharmonics ┆ (4,)   ┆ int32         ┆ [1, 2, 3, 5]...</span>
+<span class="go">│ max_periods            ┆ scalar ┆ int64         ┆ 2000...</span>
+<span class="go">│ controller             ┆ scalar ┆ PIDController ┆ PIDController(rtol=1e-08, atol...</span>
+<span class="go">│ solver                 ┆ scalar ┆ Tsit5         ┆ Tsit5()...</span>
+<span class="go">...</span>
+</pre></div>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>residuals_per_period</strong> (<em>int</em>)</p></li>
+<li><p><strong>targetted_subharmonics</strong> (<em>ndarray</em><em>[</em><em>tuple</em><em>[</em><em>Any</em><em>, </em><em>...</em><em>]</em><em>, </em><em>dtype</em><em>[</em><em>int64</em><em>]</em><em>]</em>)</p></li>
+<li><p><strong>max_periods</strong> (<em>int</em>)</p></li>
+<li><p><strong>controller</strong> (<em>PIDController</em>)</p></li>
+<li><p><strong>solver</strong> (<em>Tsit5</em>)</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinder.Params.residuals_per_period">
+<span class="sig-name descname"><span class="pre">residuals_per_period</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinder.Params.residuals_per_period" title="Link to this definition">¶</a></dt>
+<dd><p>Alias for field number 0</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinder.Params.targetted_subharmonics">
+<span class="sig-name descname"><span class="pre">targetted_subharmonics</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">ndarray</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dtype</span><span class="p"><span class="pre">[</span></span><span class="pre">int64</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinder.Params.targetted_subharmonics" title="Link to this definition">¶</a></dt>
+<dd><p>Alias for field number 1</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinder.Params.max_periods">
+<span class="sig-name descname"><span class="pre">max_periods</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinder.Params.max_periods" title="Link to this definition">¶</a></dt>
+<dd><p>Alias for field number 2</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinder.Params.controller">
+<span class="sig-name descname"><span class="pre">controller</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">PIDController</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinder.Params.controller" title="Link to this definition">¶</a></dt>
+<dd><p>Alias for field number 3</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinder.Params.solver">
+<span class="sig-name descname"><span class="pre">solver</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tsit5</span></em><a class="headerlink" href="#kinamax.integration.core.AttractorFinder.Params.solver" title="Link to this definition">¶</a></dt>
+<dd><p>Alias for field number 4</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinder.get_max_subharmonic">
+<em class="property"><span class="k"><span class="pre">static</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_max_subharmonic</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">finder</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#AttractorFinder.get_max_subharmonic"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.AttractorFinder.get_max_subharmonic" title="Link to this definition">¶</a></dt>
+<dd><p>Return the largest targeted subharmonic order.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>finder</strong> (<a class="reference internal" href="#kinamax.integration.core.AttractorFinder.Params" title="kinamax.integration.core.AttractorFinder.Params"><em>Params</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinder.get_time_steps_number">
+<em class="property"><span class="k"><span class="pre">static</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_time_steps_number</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">finder</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#AttractorFinder.get_time_steps_number"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.AttractorFinder.get_time_steps_number" title="Link to this definition">¶</a></dt>
+<dd><p>Return the number of saved samples for one shooting window.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>finder</strong> (<a class="reference internal" href="#kinamax.integration.core.AttractorFinder.Params" title="kinamax.integration.core.AttractorFinder.Params"><em>Params</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinder.get_max_shooting_iterations">
+<em class="property"><span class="k"><span class="pre">static</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_max_shooting_iterations</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">finder</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#AttractorFinder.get_max_shooting_iterations"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.AttractorFinder.get_max_shooting_iterations" title="Link to this definition">¶</a></dt>
+<dd><p>Return the maximum number of shooting windows to integrate.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>finder</strong> (<a class="reference internal" href="#kinamax.integration.core.AttractorFinder.Params" title="kinamax.integration.core.AttractorFinder.Params"><em>Params</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinder.calculate_subharmonic_atomic_residual">
+<em class="property"><span class="k"><span class="pre">static</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">calculate_subharmonic_atomic_residual</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pos</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">args</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#AttractorFinder.calculate_subharmonic_atomic_residual"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.AttractorFinder.calculate_subharmonic_atomic_residual" title="Link to this definition">¶</a></dt>
+<dd><p>Accumulate one term of the weighted shooting residual.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>pos</strong> (<em>int</em>)</p></li>
+<li><p><strong>args</strong> (<em>tuple</em><em>[</em><em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em><em>, </em><em>int</em><em>, </em><em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em><em>, </em><em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em><em>]</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>tuple[<em>Array</em> | <em>ndarray</em> | <em>bool</em> | <em>number</em> | bool | int | float | complex | <em>TypedNdArray</em>, int, <em>Array</em> | <em>ndarray</em> | <em>bool</em> | <em>number</em> | bool | int | float | complex | <em>TypedNdArray</em>, <em>Array</em> | <em>ndarray</em> | <em>bool</em> | <em>number</em> | bool | int | float | complex | <em>TypedNdArray</em>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinder.calculate_subharmonic_residual">
+<em class="property"><span class="k"><span class="pre">static</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">calculate_subharmonic_residual</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">subharmonic</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">X</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">residuals_per_period</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">state_weights</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#AttractorFinder.calculate_subharmonic_residual"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.AttractorFinder.calculate_subharmonic_residual" title="Link to this definition">¶</a></dt>
+<dd><p>Calculate the weighted shooting residual for one candidate subharmonic.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>subharmonic</strong> (<em>int</em>)</p></li>
+<li><p><strong>X</strong> (<em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em>)</p></li>
+<li><p><strong>residuals_per_period</strong> (<em>int</em>)</p></li>
+<li><p><strong>state_weights</strong> (<em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>Array</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinder.integrate_and_check_convergence">
+<em class="property"><span class="k"><span class="pre">static</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">integrate_and_check_convergence</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">finder</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">init_conditions</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">start_time</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">end_time</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">steps_number</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">problem_definition</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">problem</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">init_time_step</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">targetted_subharmonics</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">residuals_per_period</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#AttractorFinder.integrate_and_check_convergence"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.AttractorFinder.integrate_and_check_convergence" title="Link to this definition">¶</a></dt>
+<dd><p>Integrate one shooting window and evaluate residuals for each target.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>finder</strong> (<a class="reference internal" href="#kinamax.integration.core.AttractorFinder.Params" title="kinamax.integration.core.AttractorFinder.Params"><em>Params</em></a>)</p></li>
+<li><p><strong>init_conditions</strong> (<em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em>)</p></li>
+<li><p><strong>start_time</strong> (<em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em>)</p></li>
+<li><p><strong>end_time</strong> (<em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em>)</p></li>
+<li><p><strong>steps_number</strong> (<em>int</em>)</p></li>
+<li><p><strong>problem_definition</strong> (<em>Any</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>problem</strong> (<em>Any</em>)</p></li>
+<li><p><strong>init_time_step</strong> (<em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em>)</p></li>
+<li><p><strong>targetted_subharmonics</strong> (<em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em>)</p></li>
+<li><p><strong>residuals_per_period</strong> (<em>int</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>tuple[<em>Array</em>, <em>Array</em>, <em>Array</em>, <em>Array</em>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="kinamax.integration.core.AttractorFinder.find_attractors">
+<em class="property"><span class="k"><span class="pre">static</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">find_attractors</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">finder</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">problem_definition_or_problem</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">problem_or_init_conditions</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">init_conditions_or_finder_config</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">finder_config</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#AttractorFinder.find_attractors"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.AttractorFinder.find_attractors" title="Link to this definition">¶</a></dt>
+<dd><p>Integrate until convergence and then sample the attractor over one orbit.</p>
+<p>This function accepts either the legacy call shape
+<code class="docutils literal notranslate"><span class="pre">find_attractors(finder,</span> <span class="pre">problem,</span> <span class="pre">init_conditions,</span> <span class="pre">finder_config)</span></code> or the
+data-oriented shape
+<code class="docutils literal notranslate"><span class="pre">find_attractors(finder,</span> <span class="pre">problem_definition,</span> <span class="pre">problem,</span> <span class="pre">init_conditions,</span> <span class="pre">finder_config)</span></code>.</p>
+<p class="rubric">Examples</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">jax.numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">jnp</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">diffrax</span><span class="w"> </span><span class="kn">import</span> <span class="n">PIDController</span><span class="p">,</span> <span class="n">Tsit5</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">kinamax.integration.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">H46Problem</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">problem</span> <span class="o">=</span> <span class="n">H46Problem</span><span class="o">.</span><span class="n">Params</span><span class="p">(</span><span class="n">fd</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">50.0</span><span class="p">),</span> <span class="n">Ad</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">2.5</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">x0</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">finder</span> <span class="o">=</span> <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">Params</span><span class="p">(</span>
+<span class="gp">... </span>    <span class="n">residuals_per_period</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">targetted_subharmonics</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">5</span><span class="p">]),</span>
+<span class="gp">... </span>    <span class="n">max_periods</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">controller</span><span class="o">=</span><span class="n">PIDController</span><span class="p">(</span><span class="n">rtol</span><span class="o">=</span><span class="mf">1e-8</span><span class="p">,</span> <span class="n">atol</span><span class="o">=</span><span class="mf">1e-9</span><span class="p">),</span>
+<span class="gp">... </span>    <span class="n">solver</span><span class="o">=</span><span class="n">Tsit5</span><span class="p">(),</span>
+<span class="gp">... </span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">config</span> <span class="o">=</span> <span class="n">AttractorFinderConfig</span><span class="p">(</span>
+<span class="gp">... </span>    <span class="n">target_frequency</span><span class="o">=</span><span class="mf">50.0</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">init_time</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">init_time_step</span><span class="o">=</span><span class="mf">1.0e-3</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">convergence_tol</span><span class="o">=</span><span class="mf">1.0e-10</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">subharmonic_factor</span><span class="o">=</span><span class="mf">10.0</span><span class="p">,</span>
+<span class="gp">... </span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">problem</span><span class="p">,</span> <span class="n">config</span><span class="p">,</span> <span class="n">x0</span><span class="p">,</span> <span class="n">solution</span> <span class="o">=</span> <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">find_attractors</span><span class="p">(</span>
+<span class="gp">... </span>    <span class="n">finder</span><span class="p">,</span> <span class="n">H46Problem</span><span class="p">,</span> <span class="n">problem</span><span class="p">,</span> <span class="n">x0</span><span class="p">,</span> <span class="n">config</span>
+<span class="gp">... </span><span class="p">)</span>
+</pre></div>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>finder</strong> (<a class="reference internal" href="#kinamax.integration.core.AttractorFinder.Params" title="kinamax.integration.core.AttractorFinder.Params"><em>Params</em></a>)</p></li>
+<li><p><strong>problem_definition_or_problem</strong> (<em>Any</em><em> | </em><em>P</em>)</p></li>
+<li><p><strong>problem_or_init_conditions</strong> (<em>P</em><em> | </em><em>Array</em>)</p></li>
+<li><p><strong>init_conditions_or_finder_config</strong> (<em>Array</em><em> | </em><a class="reference internal" href="#kinamax.integration.core.AttractorFinderConfig" title="kinamax.integration.core.AttractorFinderConfig"><em>AttractorFinderConfig</em></a>)</p></li>
+<li><p><strong>finder_config</strong> (<a class="reference internal" href="#kinamax.integration.core.AttractorFinderConfig" title="kinamax.integration.core.AttractorFinderConfig"><em>AttractorFinderConfig</em></a><em> | </em><em>None</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>tuple[<em>P</em>, <a class="reference internal" href="#kinamax.integration.core.AttractorFinderConfig" title="kinamax.integration.core.AttractorFinderConfig"><em>AttractorFinderConfig</em></a>, <em>Array</em>, <a class="reference internal" href="#kinamax.integration.core.AttractorFinderSolution" title="kinamax.integration.core.AttractorFinderSolution"><em>AttractorFinderSolution</em></a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="kinamax.integration.core.post_process_attractor_finder_results">
+<span class="sig-prename descclassname"><span class="pre">kinamax.integration.core.</span></span><span class="sig-name descname"><span class="pre">post_process_attractor_finder_results</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">problem_class</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">problems</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">finder_configs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">init_conditions</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">solutions</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">target_subharmonics</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">solution_state_labels</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#post_process_attractor_finder_results"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.post_process_attractor_finder_results" title="Link to this definition">¶</a></dt>
+<dd><p>Flatten batched attractor-finder outputs to one balanced result table.</p>
+<p>The returned table contains one row per retained attractor sample. For a
+detected subharmonic <cite>Hk</cite>, only the first <cite>k</cite> attractor rows are kept per
+simulation so different simulations can be compared with a consistent layout.</p>
+<p class="rubric">Examples</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">jax.numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">jnp</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">diffrax</span><span class="w"> </span><span class="kn">import</span> <span class="n">PIDController</span><span class="p">,</span> <span class="n">Tsit5</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">kinamax.integration.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">H46Problem</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">problem</span> <span class="o">=</span> <span class="n">H46Problem</span><span class="o">.</span><span class="n">Params</span><span class="p">(</span><span class="n">fd</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">50.0</span><span class="p">),</span> <span class="n">Ad</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">2.5</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">x0</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">finder</span> <span class="o">=</span> <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">Params</span><span class="p">(</span>
+<span class="gp">... </span>    <span class="n">residuals_per_period</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">targetted_subharmonics</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">5</span><span class="p">]),</span>
+<span class="gp">... </span>    <span class="n">max_periods</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">controller</span><span class="o">=</span><span class="n">PIDController</span><span class="p">(</span><span class="n">rtol</span><span class="o">=</span><span class="mf">1e-8</span><span class="p">,</span> <span class="n">atol</span><span class="o">=</span><span class="mf">1e-9</span><span class="p">),</span>
+<span class="gp">... </span>    <span class="n">solver</span><span class="o">=</span><span class="n">Tsit5</span><span class="p">(),</span>
+<span class="gp">... </span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">config</span> <span class="o">=</span> <span class="n">AttractorFinderConfig</span><span class="p">(</span>
+<span class="gp">... </span>    <span class="n">target_frequency</span><span class="o">=</span><span class="mf">50.0</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">init_time</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">init_time_step</span><span class="o">=</span><span class="mf">1.0e-3</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">convergence_tol</span><span class="o">=</span><span class="mf">1.0e-10</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">subharmonic_factor</span><span class="o">=</span><span class="mf">10.0</span><span class="p">,</span>
+<span class="gp">... </span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">problem</span><span class="p">,</span> <span class="n">config</span><span class="p">,</span> <span class="n">x0</span><span class="p">,</span> <span class="n">solution</span> <span class="o">=</span> <span class="n">AttractorFinder</span><span class="o">.</span><span class="n">find_attractors</span><span class="p">(</span>
+<span class="gp">... </span>    <span class="n">finder</span><span class="p">,</span> <span class="n">H46Problem</span><span class="p">,</span> <span class="n">problem</span><span class="p">,</span> <span class="n">x0</span><span class="p">,</span> <span class="n">config</span>
+<span class="gp">... </span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">table</span> <span class="o">=</span> <span class="n">post_process_attractor_finder_results</span><span class="p">(</span>
+<span class="gp">... </span>    <span class="n">problem_class</span><span class="o">=</span><span class="n">H46Problem</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">problems</span><span class="o">=</span><span class="n">problem</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">finder_configs</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">init_conditions</span><span class="o">=</span><span class="n">x0</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">solutions</span><span class="o">=</span><span class="n">solution</span><span class="p">,</span>
+<span class="gp">... </span>    <span class="n">target_subharmonics</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">5</span><span class="p">]),</span>
+<span class="gp">... </span>    <span class="n">solution_state_labels</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;xa&quot;</span><span class="p">,</span> <span class="s2">&quot;dotxa&quot;</span><span class="p">,</span> <span class="s2">&quot;Eha&quot;</span><span class="p">],</span>
+<span class="gp">... </span><span class="p">)</span>
+</pre></div>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>problem_class</strong> (<em>Any</em>)</p></li>
+<li><p><strong>problems</strong> (<em>Any</em>)</p></li>
+<li><p><strong>finder_configs</strong> (<em>Any</em>)</p></li>
+<li><p><strong>init_conditions</strong> (<em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em>)</p></li>
+<li><p><strong>solutions</strong> (<a class="reference internal" href="#kinamax.integration.core.AttractorFinderSolution" title="kinamax.integration.core.AttractorFinderSolution"><em>AttractorFinderSolution</em></a>)</p></li>
+<li><p><strong>target_subharmonics</strong> (<em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em>)</p></li>
+<li><p><strong>solution_state_labels</strong> (<em>Sequence</em><em>[</em><em>str</em><em>]</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>DataFrame</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="kinamax.integration.core.cluster_points">
+<span class="sig-prename descclassname"><span class="pre">kinamax.integration.core.</span></span><span class="sig-name descname"><span class="pre">cluster_points</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">points</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">weights</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">distance_threshold</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.01</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">method</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'dbscan'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#cluster_points"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.cluster_points" title="Link to this definition">¶</a></dt>
+<dd><p>Cluster weighted points and return labels with centroids in original space.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>points</strong> (<em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em>)</p></li>
+<li><p><strong>weights</strong> (<em>Array</em><em> | </em><em>ndarray</em><em> | </em><em>bool</em><em> | </em><em>number</em><em> | </em><em>bool</em><em> | </em><em>int</em><em> | </em><em>float</em><em> | </em><em>complex</em><em> | </em><em>TypedNdArray</em>)</p></li>
+<li><p><strong>distance_threshold</strong> (<em>float</em>)</p></li>
+<li><p><strong>method</strong> (<em>str</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>tuple[int, <em>ndarray</em>, <em>ndarray</em>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="kinamax.integration.core.detect_orbits">
+<span class="sig-prename descclassname"><span class="pre">kinamax.integration.core.</span></span><span class="sig-name descname"><span class="pre">detect_orbits</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">problem_class</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">simulations</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ode_params_labels</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">attractor_state_vec_labels</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">state_vec_labels</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">distance_threshold</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.01</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clustering_method</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'dbscan'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/kinamax/integration/core.html#detect_orbits"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#kinamax.integration.core.detect_orbits" title="Link to this definition">¶</a></dt>
+<dd><p>Cluster attractor samples per configuration and map them to orbit IDs.</p>
+<p>Workflow:</p>
+<ol class="arabic simple">
+<li><p>Group rows by ODE parameters, detected subharmonic, and target frequency
+so each configuration is processed independently.</p></li>
+<li><p>Cluster the recorded attractor points in the weighted state space to
+estimate unique attractors for the group.</p></li>
+<li><p>Assign globally unique attractor labels and record which simulations
+share the same attractor tuple (one orbit).</p></li>
+<li><p>Return tidy Polars DataFrames for attractors and the simulation-&gt;orbit map.</p></li>
+</ol>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>problem_class</strong> (<em>Any</em>)</p></li>
+<li><p><strong>simulations</strong> (<em>DataFrame</em>)</p></li>
+<li><p><strong>ode_params_labels</strong> (<em>Sequence</em><em>[</em><em>str</em><em>]</em>)</p></li>
+<li><p><strong>attractor_state_vec_labels</strong> (<em>Sequence</em><em>[</em><em>str</em><em>]</em>)</p></li>
+<li><p><strong>state_vec_labels</strong> (<em>Sequence</em><em>[</em><em>str</em><em>]</em>)</p></li>
+<li><p><strong>distance_threshold</strong> (<em>float</em>)</p></li>
+<li><p><strong>clustering_method</strong> (<em>str</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>tuple[<em>DataFrame</em>, <em>DataFrame</em>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">kinamax</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">kinamax.integration.core</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="problems.html"><code class="docutils literal notranslate"><span class="pre">kinamax.integration.models</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="hbm.html"><code class="docutils literal notranslate"><span class="pre">kinamax.hbm</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../examples/index.html">Examples</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">API Reference</a><ul>
+      <li>Previous: <a href="index.html" title="previous chapter">API Reference</a></li>
+      <li>Next: <a href="problems.html" title="next chapter"><code class="docutils literal notranslate"><span class="pre">kinamax.integration.models</span></code></a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ludovic Charleux, Cloé Léglise, Adrien Morel, and the kinamax contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../_sources/api/core.md.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

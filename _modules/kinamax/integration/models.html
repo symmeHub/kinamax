@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>kinamax.integration.models &#8212; kinamax 0.1.0</title>
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css?v=8cd3d715" />
+    <script src="../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for kinamax.integration.models</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Time-integration problem definitions and reference models.&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">ClassVar</span><span class="p">,</span> <span class="n">NamedTuple</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jax</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">jax.numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">jnp</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jax.tree_util</span><span class="w"> </span><span class="kn">import</span> <span class="n">register_dataclass</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jax.typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ArrayLike</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">Container</span><span class="p">,</span> <span class="n">namedtuple_repr</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;H46Problem&quot;</span><span class="p">,</span> <span class="s2">&quot;H46_EM_Problem&quot;</span><span class="p">]</span>
+
+
+<div class="viewcode-block" id="H46Problem">
+<a class="viewcode-back" href="../../../api/problems.html#kinamax.integration.models.H46Problem">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">H46Problem</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Namespace holding the H46 problem data layouts and static helpers.&quot;&quot;&quot;</span>
+
+    <span class="n">state_vector_labels</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="s2">&quot;dotx&quot;</span><span class="p">,</span> <span class="s2">&quot;Eh&quot;</span><span class="p">)</span>
+    <span class="n">params_labels</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;xw&quot;</span><span class="p">,</span> <span class="s2">&quot;w0&quot;</span><span class="p">,</span> <span class="s2">&quot;Ad&quot;</span><span class="p">,</span> <span class="s2">&quot;Q&quot;</span><span class="p">,</span> <span class="s2">&quot;fd&quot;</span><span class="p">)</span>
+
+<div class="viewcode-block" id="H46Problem.Params">
+<a class="viewcode-back" href="../../../api/problems.html#kinamax.integration.models.H46Problem.Params">[docs]</a>
+    <span class="k">class</span><span class="w"> </span><span class="nc">Params</span><span class="p">(</span><span class="n">NamedTuple</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Physical parameters of the driven H46 oscillator.</span>
+
+<span class="sd">        Examples</span>
+<span class="sd">        --------</span>
+<span class="sd">        &gt;&gt;&gt; import jax.numpy as jnp</span>
+<span class="sd">        &gt;&gt;&gt; problem = H46Problem.Params(fd=jnp.array(50.0), Ad=jnp.array(2.5))</span>
+<span class="sd">        &gt;&gt;&gt; print(problem)</span>
+<span class="sd">        H46Problem.Params</span>
+<span class="sd">        ...</span>
+<span class="sd">        │ xw    ┆ scalar ┆ float32 ┆ 0.0005000000237487257...</span>
+<span class="sd">        │ fd    ┆ scalar ┆ float32 ┆ 50.0...</span>
+<span class="sd">        │ w0    ┆ scalar ┆ float32 ┆ 121.0...</span>
+<span class="sd">        │ Q     ┆ scalar ┆ float32 ┆ 87.0...</span>
+<span class="sd">        │ Ad    ┆ scalar ┆ float32 ┆ 2.5...</span>
+<span class="sd">        ...</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">xw</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">0.5e-3</span><span class="p">)</span>
+        <span class="n">fd</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">50.0</span><span class="p">)</span>
+        <span class="n">w0</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">121.0</span><span class="p">)</span>
+        <span class="n">Q</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">87.0</span><span class="p">)</span>
+        <span class="n">Ad</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">2.5</span><span class="p">)</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">namedtuple_repr</span><span class="p">(</span>
+                <span class="s2">&quot;H46Problem.Params&quot;</span><span class="p">,</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;xw&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">xw</span><span class="p">,</span>
+                    <span class="s2">&quot;fd&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">fd</span><span class="p">,</span>
+                    <span class="s2">&quot;w0&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">w0</span><span class="p">,</span>
+                    <span class="s2">&quot;Q&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">Q</span><span class="p">,</span>
+                    <span class="s2">&quot;Ad&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">Ad</span><span class="p">,</span>
+                <span class="p">},</span>
+            <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="H46Problem.state_weights">
+<a class="viewcode-back" href="../../../api/problems.html#kinamax.integration.models.H46Problem.state_weights">[docs]</a>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">state_weights</span><span class="p">(</span><span class="n">problem</span><span class="p">:</span> <span class="s2">&quot;H46Problem.Params&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return per-state scaling weights aligned with ``[x, dotx, Eh]``.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span> <span class="o">/</span> <span class="n">problem</span><span class="o">.</span><span class="n">xw</span><span class="p">,</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="p">(</span><span class="n">problem</span><span class="o">.</span><span class="n">w0</span> <span class="o">*</span> <span class="n">problem</span><span class="o">.</span><span class="n">xw</span><span class="p">),</span> <span class="mf">0.0</span><span class="p">])</span></div>
+
+
+<div class="viewcode-block" id="H46Problem.rhs">
+<a class="viewcode-back" href="../../../api/problems.html#kinamax.integration.models.H46Problem.rhs">[docs]</a>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">rhs</span><span class="p">(</span>
+        <span class="n">problem</span><span class="p">:</span> <span class="s2">&quot;H46Problem.Params&quot;</span><span class="p">,</span>
+        <span class="n">t</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
+        <span class="n">X</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
+        <span class="n">args</span><span class="p">:</span> <span class="n">Any</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Evaluate the H46 oscillator right-hand side.&quot;&quot;&quot;</span>
+        <span class="k">del</span> <span class="n">args</span>
+        <span class="n">x</span><span class="p">,</span> <span class="n">dotx</span><span class="p">,</span> <span class="n">_Eh</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">X</span><span class="p">)</span>
+        <span class="n">wd</span> <span class="o">=</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="n">jnp</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="n">problem</span><span class="o">.</span><span class="n">fd</span>
+        <span class="n">ddotx</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="o">-</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">pow</span><span class="p">(</span><span class="n">problem</span><span class="o">.</span><span class="n">w0</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span> <span class="o">/</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">pow</span><span class="p">(</span><span class="n">x</span> <span class="o">/</span> <span class="n">problem</span><span class="o">.</span><span class="n">xw</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span> <span class="o">-</span> <span class="mf">1.0</span><span class="p">)</span> <span class="o">*</span> <span class="n">x</span>
+            <span class="o">-</span> <span class="n">problem</span><span class="o">.</span><span class="n">w0</span> <span class="o">/</span> <span class="n">problem</span><span class="o">.</span><span class="n">Q</span> <span class="o">*</span> <span class="n">dotx</span>
+            <span class="o">+</span> <span class="n">problem</span><span class="o">.</span><span class="n">Ad</span> <span class="o">*</span> <span class="n">jnp</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">wd</span> <span class="o">*</span> <span class="n">jnp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">t</span><span class="p">))</span>
+        <span class="p">)</span>
+        <span class="n">Ph</span> <span class="o">=</span> <span class="n">problem</span><span class="o">.</span><span class="n">w0</span> <span class="o">/</span> <span class="n">problem</span><span class="o">.</span><span class="n">Q</span> <span class="o">*</span> <span class="n">dotx</span><span class="o">**</span><span class="mi">2</span>
+        <span class="k">return</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">dotx</span><span class="p">,</span> <span class="n">ddotx</span><span class="p">,</span> <span class="n">Ph</span><span class="p">])</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="H46_EM_Problem">
+<a class="viewcode-back" href="../../../api/problems.html#kinamax.integration.models.H46_EM_Problem">[docs]</a>
+<span class="nd">@register_dataclass</span>
+<span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">H46_EM_Problem</span><span class="p">(</span><span class="n">Container</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;H46 benchmark problem with electromechanical coupling.</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    &gt;&gt;&gt; import jax.numpy as jnp</span>
+<span class="sd">    &gt;&gt;&gt; problem = H46_EM_Problem(fd=jnp.linspace(20.0, 50.0, 11), Ad=2.5)</span>
+<span class="sd">    &gt;&gt;&gt; problem.fd.shape</span>
+<span class="sd">    (11,)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">xw</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="mf">0.5e-3</span>
+    <span class="n">fd</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="mf">50.0</span>
+    <span class="n">w0</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="mf">121.0</span>
+    <span class="n">Q</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="mf">87.0</span>
+    <span class="n">Ad</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="mf">2.5</span>
+    <span class="n">alpha</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="mf">0.068</span>
+    <span class="n">C0</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="mf">1.05e-6</span>
+    <span class="n">R</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="mf">7.83e3</span>
+    <span class="n">L</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="mf">25e-3</span>
+    <span class="n">M</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="mf">17.3e-3</span>
+
+    <span class="n">state_vector_labels</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="s2">&quot;dotx&quot;</span><span class="p">,</span> <span class="s2">&quot;v&quot;</span><span class="p">,</span> <span class="s2">&quot;Ev&quot;</span><span class="p">,</span> <span class="s2">&quot;Eh&quot;</span><span class="p">]</span>
+    <span class="n">params_labels</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="s2">&quot;xw&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;w0&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Ad&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Q&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;fd&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;alpha&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;C0&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;R&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;L&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;M&quot;</span><span class="p">,</span>
+    <span class="p">]</span>
+
+<div class="viewcode-block" id="H46_EM_Problem.state_weights">
+<a class="viewcode-back" href="../../../api/problems.html#kinamax.integration.models.H46_EM_Problem.state_weights">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">state_weights</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return per-state scaling weights aligned with ``[x, dotx, v, Ev, Eh]``.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">xw</span><span class="p">,</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">w0</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">xw</span><span class="p">),</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">])</span></div>
+
+
+<div class="viewcode-block" id="H46_EM_Problem.rhs">
+<a class="viewcode-back" href="../../../api/problems.html#kinamax.integration.models.H46_EM_Problem.rhs">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">rhs</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">t</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">,</span> <span class="n">X</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">,</span> <span class="n">args</span><span class="p">:</span> <span class="n">Any</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">jax</span><span class="o">.</span><span class="n">Array</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Evaluate the electromechanically coupled H46 right-hand side.&quot;&quot;&quot;</span>
+        <span class="k">del</span> <span class="n">args</span>
+        <span class="n">x</span><span class="p">,</span> <span class="n">dotx</span><span class="p">,</span> <span class="n">v</span><span class="p">,</span> <span class="n">_Ev</span><span class="p">,</span> <span class="n">_Eh</span> <span class="o">=</span> <span class="n">X</span>
+        <span class="n">wd</span> <span class="o">=</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="n">jnp</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">fd</span>
+        <span class="n">ddotx</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="o">-</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">pow</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">w0</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span> <span class="o">/</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">pow</span><span class="p">(</span><span class="n">x</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">xw</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span> <span class="o">-</span> <span class="mf">1.0</span><span class="p">)</span> <span class="o">*</span> <span class="n">x</span>
+            <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">w0</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">Q</span> <span class="o">*</span> <span class="n">dotx</span>
+            <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">Ad</span> <span class="o">*</span> <span class="n">jnp</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">wd</span> <span class="o">*</span> <span class="n">t</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">dotv</span> <span class="o">=</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">alpha</span> <span class="o">/</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">L</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">C0</span><span class="p">)</span> <span class="o">*</span> <span class="n">x</span> <span class="o">*</span> <span class="n">dotx</span> <span class="o">-</span> <span class="n">v</span> <span class="o">/</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">R</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">C0</span><span class="p">)</span>
+        <span class="n">Pv</span> <span class="o">=</span> <span class="n">dotx</span><span class="o">**</span><span class="mi">2</span> <span class="o">*</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">w0</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">Q</span><span class="p">)</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">M</span>
+        <span class="n">Ph</span> <span class="o">=</span> <span class="n">v</span><span class="o">**</span><span class="mi">2</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">R</span>
+        <span class="k">return</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">dotx</span><span class="p">,</span> <span class="n">ddotx</span><span class="p">,</span> <span class="n">dotv</span><span class="p">,</span> <span class="n">Pv</span><span class="p">,</span> <span class="n">Ph</span><span class="p">])</span></div>
+</div>
+
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">kinamax</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/index.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples/index.html">Examples</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ludovic Charleux, Cloé Léglise, Adrien Morel, and the kinamax contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.2.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>
