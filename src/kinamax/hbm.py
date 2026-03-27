@@ -22,6 +22,14 @@ from .core import namedtuple_repr
 __all__ = [
     "FourierCoeffs",
     "SampledSignal",
+    "add_fourier_coeffs",
+    "sub_fourier_coeffs",
+    "scale_fourier_coeffs",
+    "sum_fourier_coeffs",
+    "add_sampled_signals",
+    "sub_sampled_signals",
+    "scale_sampled_signal",
+    "sum_sampled_signals",
     "coeffs_to_complex",
     "complex_to_coeffs",
     "coeffs_derivative",
@@ -35,6 +43,25 @@ __all__ = [
 class FourierCoeffs(NamedTuple):
     """Real Fourier coefficients paired with the fundamental frequency in Hz.
 
+    The arithmetic implemented on this container is intentionally limited to the
+    linear operations that preserve the Fourier basis directly:
+
+    - addition and subtraction between coefficient vectors
+    - unary plus and minus
+    - multiplication and division by scalars
+
+    These operations preserve `frequency` without checking it at runtime so they
+    remain compatible with `jax.jit`. In practice, matching frequencies are a
+    contract of use.
+
+    Static constructors are also provided for the common forcing patterns used
+    in HBM models:
+
+    - `FourierCoeffs.zeros(...)`
+    - `FourierCoeffs.cosine(...)`
+    - `FourierCoeffs.sine(...)`
+    - `FourierCoeffs.phased(...)`
+
     Examples
     --------
     >>> import jax.numpy as jnp
@@ -47,6 +74,12 @@ class FourierCoeffs(NamedTuple):
     ...
     │ frequency ┆ scalar ┆ float32 ┆ 5.0...
     │ values    ┆ (3,)   ┆ float32 ┆ [0. , 1. , 0.5]...
+    ...
+    >>> print(coeffs + FourierCoeffs(values=jnp.array([1.0, 0.0, 0.0]), frequency=5.0))
+    FourierCoeffs
+    ...
+    │ frequency ┆ scalar ┆ float32 ┆ 5.0...
+    │ values    ┆ (3,)   ┆ float32 ┆ [1. , 1. , 0.5]...
     ...
     """
 
@@ -62,9 +95,141 @@ class FourierCoeffs(NamedTuple):
             },
         )
 
+    @staticmethod
+    def zeros(order: int, frequency: ArrayLike) -> "FourierCoeffs":
+        """Build a zero coefficient vector up to harmonic ``order``."""
+        if order < 0:
+            raise ValueError("order must be >= 0.")
+        dtype = jnp.result_type(jnp.asarray(frequency), 0.0)
+        return FourierCoeffs(
+            values=jnp.zeros(2 * order + 1, dtype=dtype),
+            frequency=jnp.asarray(frequency),
+        )
+
+    @staticmethod
+    def cosine(
+        amplitude: ArrayLike,
+        harmonic: int,
+        order: int,
+        frequency: ArrayLike,
+    ) -> "FourierCoeffs":
+        """Build ``amplitude * cos(harmonic * 2*pi*frequency*t)``."""
+        if order < 0:
+            raise ValueError("order must be >= 0.")
+        if harmonic < 1 or harmonic > order:
+            raise ValueError("harmonic must satisfy 1 <= harmonic <= order.")
+        coeffs = FourierCoeffs.zeros(order=order, frequency=frequency)
+        return FourierCoeffs(
+            values=coeffs.values.at[harmonic].set(jnp.asarray(amplitude)),
+            frequency=coeffs.frequency,
+        )
+
+    @staticmethod
+    def sine(
+        amplitude: ArrayLike,
+        harmonic: int,
+        order: int,
+        frequency: ArrayLike,
+    ) -> "FourierCoeffs":
+        """Build ``amplitude * sin(harmonic * 2*pi*frequency*t)``."""
+        if order < 0:
+            raise ValueError("order must be >= 0.")
+        if harmonic < 1 or harmonic > order:
+            raise ValueError("harmonic must satisfy 1 <= harmonic <= order.")
+        coeffs = FourierCoeffs.zeros(order=order, frequency=frequency)
+        return FourierCoeffs(
+            values=coeffs.values.at[order + harmonic].set(jnp.asarray(amplitude)),
+            frequency=coeffs.frequency,
+        )
+
+    @staticmethod
+    def phased(
+        amplitude: ArrayLike,
+        phase: ArrayLike,
+        harmonic: int,
+        order: int,
+        frequency: ArrayLike,
+    ) -> "FourierCoeffs":
+        """Build ``amplitude * cos(harmonic * 2*pi*frequency*t + phase)``."""
+        amplitude = jnp.asarray(amplitude)
+        phase = jnp.asarray(phase)
+        return (
+            FourierCoeffs.cosine(
+                amplitude=amplitude * jnp.cos(phase),
+                harmonic=harmonic,
+                order=order,
+                frequency=frequency,
+            )
+            - FourierCoeffs.sine(
+                amplitude=amplitude * jnp.sin(phase),
+                harmonic=harmonic,
+                order=order,
+                frequency=frequency,
+            )
+        )
+
+    def __pos__(self) -> "FourierCoeffs":
+        return self
+
+    def __neg__(self) -> "FourierCoeffs":
+        return FourierCoeffs(values=-jnp.asarray(self.values), frequency=self.frequency)
+
+    def __add__(self, other: object) -> "FourierCoeffs":
+        if not isinstance(other, FourierCoeffs):
+            return NotImplemented
+        return FourierCoeffs(
+            values=jnp.asarray(self.values) + jnp.asarray(other.values),
+            frequency=self.frequency,
+        )
+
+    def __radd__(self, other: object) -> "FourierCoeffs":
+        if other == 0:
+            return self
+        if not isinstance(other, FourierCoeffs):
+            return NotImplemented
+        return other + self
+
+    def __sub__(self, other: object) -> "FourierCoeffs":
+        if not isinstance(other, FourierCoeffs):
+            return NotImplemented
+        return FourierCoeffs(
+            values=jnp.asarray(self.values) - jnp.asarray(other.values),
+            frequency=self.frequency,
+        )
+
+    def __rsub__(self, other: object) -> "FourierCoeffs":
+        if not isinstance(other, FourierCoeffs):
+            return NotImplemented
+        return other - self
+
+    def __mul__(self, scalar: ArrayLike) -> "FourierCoeffs":
+        return FourierCoeffs(
+            values=jnp.asarray(self.values) * jnp.asarray(scalar),
+            frequency=self.frequency,
+        )
+
+    def __rmul__(self, scalar: ArrayLike) -> "FourierCoeffs":
+        return self * scalar
+
+    def __truediv__(self, scalar: ArrayLike) -> "FourierCoeffs":
+        return FourierCoeffs(
+            values=jnp.asarray(self.values) / jnp.asarray(scalar),
+            frequency=self.frequency,
+        )
+
 
 class SampledSignal(NamedTuple):
     """Uniformly sampled signal over one period, tagged by its frequency in Hz.
+
+    The arithmetic implemented on this container is limited to the linear
+    operations that preserve the sampling layout directly:
+
+    - addition and subtraction between sampled signals
+    - unary plus and minus
+    - multiplication and division by scalars
+
+    As for `FourierCoeffs`, `frequency` is propagated without runtime checks so
+    the operations remain compatible with `jax.jit`.
 
     Examples
     --------
@@ -110,6 +275,107 @@ class SampledSignal(NamedTuple):
                 "values": self.values,
             },
         )
+
+    def __pos__(self) -> "SampledSignal":
+        return self
+
+    def __neg__(self) -> "SampledSignal":
+        return SampledSignal(values=-jnp.asarray(self.values), frequency=self.frequency)
+
+    def __add__(self, other: object) -> "SampledSignal":
+        if not isinstance(other, SampledSignal):
+            return NotImplemented
+        return SampledSignal(
+            values=jnp.asarray(self.values) + jnp.asarray(other.values),
+            frequency=self.frequency,
+        )
+
+    def __radd__(self, other: object) -> "SampledSignal":
+        if other == 0:
+            return self
+        if not isinstance(other, SampledSignal):
+            return NotImplemented
+        return other + self
+
+    def __sub__(self, other: object) -> "SampledSignal":
+        if not isinstance(other, SampledSignal):
+            return NotImplemented
+        return SampledSignal(
+            values=jnp.asarray(self.values) - jnp.asarray(other.values),
+            frequency=self.frequency,
+        )
+
+    def __rsub__(self, other: object) -> "SampledSignal":
+        if not isinstance(other, SampledSignal):
+            return NotImplemented
+        return other - self
+
+    def __mul__(self, scalar: ArrayLike) -> "SampledSignal":
+        return SampledSignal(
+            values=jnp.asarray(self.values) * jnp.asarray(scalar),
+            frequency=self.frequency,
+        )
+
+    def __rmul__(self, scalar: ArrayLike) -> "SampledSignal":
+        return self * scalar
+
+    def __truediv__(self, scalar: ArrayLike) -> "SampledSignal":
+        return SampledSignal(
+            values=jnp.asarray(self.values) / jnp.asarray(scalar),
+            frequency=self.frequency,
+        )
+
+
+def add_fourier_coeffs(a: FourierCoeffs, b: FourierCoeffs) -> FourierCoeffs:
+    """Add two Fourier coefficient containers.
+
+    This helper is equivalent to `a + b` and is compatible with `jax.jit`.
+    Frequency consistency is assumed by contract and is not checked at runtime.
+    """
+    return a + b
+
+
+def sub_fourier_coeffs(a: FourierCoeffs, b: FourierCoeffs) -> FourierCoeffs:
+    """Subtract two Fourier coefficient containers."""
+    return a - b
+
+
+def scale_fourier_coeffs(X: FourierCoeffs, scalar: ArrayLike) -> FourierCoeffs:
+    """Multiply a Fourier coefficient container by a scalar."""
+    return X * scalar
+
+
+def sum_fourier_coeffs(*terms: FourierCoeffs) -> FourierCoeffs:
+    """Sum multiple Fourier coefficient containers.
+
+    This helper is meant for building HBM residuals with repeated linear
+    combinations inside JAX-compiled code paths.
+    """
+    if len(terms) == 0:
+        raise ValueError("At least one FourierCoeffs term is required.")
+    return sum(terms[1:], start=terms[0])
+
+
+def add_sampled_signals(a: SampledSignal, b: SampledSignal) -> SampledSignal:
+    """Add two sampled-signal containers."""
+    return a + b
+
+
+def sub_sampled_signals(a: SampledSignal, b: SampledSignal) -> SampledSignal:
+    """Subtract two sampled-signal containers."""
+    return a - b
+
+
+def scale_sampled_signal(x: SampledSignal, scalar: ArrayLike) -> SampledSignal:
+    """Multiply a sampled-signal container by a scalar."""
+    return x * scalar
+
+
+def sum_sampled_signals(*terms: SampledSignal) -> SampledSignal:
+    """Sum multiple sampled-signal containers."""
+    if len(terms) == 0:
+        raise ValueError("At least one SampledSignal term is required.")
+    return sum(terms[1:], start=terms[0])
 
 
 def _harmonic_order_count(coeffs: jax.Array) -> int:

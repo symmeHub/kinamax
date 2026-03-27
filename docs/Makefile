@@ -26,8 +26,7 @@ serve:
 	@echo "Serving documentation at http://$(HOST):$(PORT)"
 	@cd "$(BUILDDIR)/html" && python -m http.server "$(PORT)" --bind "$(HOST)"
 
-publish:
-	@command -v gh >/dev/null 2>&1 || { echo "GitHub CLI (gh) is required for publish."; exit 1; }
-	@echo "Triggering GitHub Pages deployment from branch main"
-	@echo "Only changes already committed and pushed to main will be published."
-	@gh workflow run docs.yml --ref main
+publish: html
+	@command -v ghp-import >/dev/null 2>&1 || { echo "ghp-import is required for publish."; exit 1; }
+	@echo "Publishing documentation to branch gh-pages"
+	@ghp-import -n -p "$(BUILDDIR)/html"
