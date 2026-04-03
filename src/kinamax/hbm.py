@@ -15,13 +15,19 @@ from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
+import polars as pl
 from jax.typing import ArrayLike
 
 from .core import namedtuple_repr
 
 __all__ = [
-    "FourierCoeffs",
     "SampledSignal",
+    "fourier_zeros",
+    "cosine_forcing",
+    "sine_forcing",
+    "phased_forcing",
+    "format_fourier_coeffs",
+    "print_fourier_coeffs",
     "add_fourier_coeffs",
     "sub_fourier_coeffs",
     "scale_fourier_coeffs",
@@ -40,182 +46,104 @@ __all__ = [
     "coeffs_pow",
 ]
 
-class FourierCoeffs(NamedTuple):
-    """Real Fourier coefficients paired with the fundamental frequency in Hz.
 
-    The arithmetic implemented on this container is intentionally limited to the
-    linear operations that preserve the Fourier basis directly:
+def fourier_zeros(order: int, dtype: ArrayLike = 0.0) -> jax.Array:
+    """Build a zero coefficient vector up to harmonic ``order``."""
+    if order < 0:
+        raise ValueError("order must be >= 0.")
+    return jnp.zeros(2 * order + 1, dtype=jnp.result_type(jnp.asarray(dtype)))
 
-    - addition and subtraction between coefficient vectors
-    - unary plus and minus
-    - multiplication and division by scalars
 
-    These operations preserve `frequency` without checking it at runtime so they
-    remain compatible with `jax.jit`. In practice, matching frequencies are a
-    contract of use.
+def cosine_forcing(amplitude: ArrayLike, harmonic: int, order: int) -> jax.Array:
+    """Build ``amplitude * cos(harmonic * wd * t)`` in stacked real form."""
+    if order < 0:
+        raise ValueError("order must be >= 0.")
+    if harmonic < 1 or harmonic > order:
+        raise ValueError("harmonic must satisfy 1 <= harmonic <= order.")
+    coeffs = fourier_zeros(order=order, dtype=amplitude)
+    return coeffs.at[harmonic].set(jnp.asarray(amplitude))
 
-    Static constructors are also provided for the common forcing patterns used
-    in HBM models:
 
-    - `FourierCoeffs.zeros(...)`
-    - `FourierCoeffs.cosine(...)`
-    - `FourierCoeffs.sine(...)`
-    - `FourierCoeffs.phased(...)`
+def sine_forcing(amplitude: ArrayLike, harmonic: int, order: int) -> jax.Array:
+    """Build ``amplitude * sin(harmonic * wd * t)`` in stacked real form."""
+    if order < 0:
+        raise ValueError("order must be >= 0.")
+    if harmonic < 1 or harmonic > order:
+        raise ValueError("harmonic must satisfy 1 <= harmonic <= order.")
+    coeffs = fourier_zeros(order=order, dtype=amplitude)
+    return coeffs.at[order + harmonic].set(jnp.asarray(amplitude))
 
-    Examples
-    --------
-    >>> import jax.numpy as jnp
-    >>> coeffs = FourierCoeffs(
-    ...     values=jnp.array([0.0, 1.0, 0.5]),
-    ...     frequency=jnp.float32(5.0),
-    ... )
-    >>> print(coeffs)
-    FourierCoeffs
-    ...
-    │ frequency ┆ scalar ┆ float32 ┆ 5.0...
-    │ values    ┆ (3,)   ┆ float32 ┆ [0. , 1. , 0.5]...
-    ...
-    >>> print(coeffs + FourierCoeffs(values=jnp.array([1.0, 0.0, 0.0]), frequency=5.0))
-    FourierCoeffs
-    ...
-    │ frequency ┆ scalar ┆ float32 ┆ 5.0...
-    │ values    ┆ (3,)   ┆ float32 ┆ [1. , 1. , 0.5]...
-    ...
-    """
 
-    values: jax.Array
-    frequency: float | jax.Array
+def phased_forcing(
+    amplitude: ArrayLike,
+    phase: ArrayLike,
+    harmonic: int,
+    order: int,
+) -> jax.Array:
+    """Build ``amplitude * cos(harmonic * wd * t + phase)``."""
+    amplitude = jnp.asarray(amplitude)
+    phase = jnp.asarray(phase)
+    return cosine_forcing(
+        amplitude=amplitude * jnp.cos(phase),
+        harmonic=harmonic,
+        order=order,
+    ) - sine_forcing(
+        amplitude=amplitude * jnp.sin(phase),
+        harmonic=harmonic,
+        order=order,
+    )
 
-    def __repr__(self) -> str:
-        return namedtuple_repr(
-            "FourierCoeffs",
-            {
-                "frequency": self.frequency,
-                "values": self.values,
-            },
-        )
 
-    @staticmethod
-    def zeros(order: int, frequency: ArrayLike) -> "FourierCoeffs":
-        """Build a zero coefficient vector up to harmonic ``order``."""
-        if order < 0:
-            raise ValueError("order must be >= 0.")
-        dtype = jnp.result_type(jnp.asarray(frequency), 0.0)
-        return FourierCoeffs(
-            values=jnp.zeros(2 * order + 1, dtype=dtype),
-            frequency=jnp.asarray(frequency),
-        )
+def _harmonic_order_count(coeffs: jax.Array) -> int:
+    """Return the highest retained harmonic order for a stacked real vector."""
+    size = coeffs.size
+    if size < 1 or size % 2 == 0:
+        raise ValueError("HBM coefficient vectors must have odd length 2*N + 1.")
+    return (size - 1) // 2
 
-    @staticmethod
-    def cosine(
-        amplitude: ArrayLike,
-        harmonic: int,
-        order: int,
-        frequency: ArrayLike,
-    ) -> "FourierCoeffs":
-        """Build ``amplitude * cos(harmonic * 2*pi*frequency*t)``."""
-        if order < 0:
-            raise ValueError("order must be >= 0.")
-        if harmonic < 1 or harmonic > order:
-            raise ValueError("harmonic must satisfy 1 <= harmonic <= order.")
-        coeffs = FourierCoeffs.zeros(order=order, frequency=frequency)
-        return FourierCoeffs(
-            values=coeffs.values.at[harmonic].set(jnp.asarray(amplitude)),
-            frequency=coeffs.frequency,
-        )
 
-    @staticmethod
-    def sine(
-        amplitude: ArrayLike,
-        harmonic: int,
-        order: int,
-        frequency: ArrayLike,
-    ) -> "FourierCoeffs":
-        """Build ``amplitude * sin(harmonic * 2*pi*frequency*t)``."""
-        if order < 0:
-            raise ValueError("order must be >= 0.")
-        if harmonic < 1 or harmonic > order:
-            raise ValueError("harmonic must satisfy 1 <= harmonic <= order.")
-        coeffs = FourierCoeffs.zeros(order=order, frequency=frequency)
-        return FourierCoeffs(
-            values=coeffs.values.at[order + harmonic].set(jnp.asarray(amplitude)),
-            frequency=coeffs.frequency,
-        )
+def _require_positive_factor(name: str, value: int) -> None:
+    """Validate integer sampling factors used for FFT domain conversions."""
+    if value < 1:
+        raise ValueError(f"{name} must be >= 1.")
 
-    @staticmethod
-    def phased(
-        amplitude: ArrayLike,
-        phase: ArrayLike,
-        harmonic: int,
-        order: int,
-        frequency: ArrayLike,
-    ) -> "FourierCoeffs":
-        """Build ``amplitude * cos(harmonic * 2*pi*frequency*t + phase)``."""
-        amplitude = jnp.asarray(amplitude)
-        phase = jnp.asarray(phase)
-        return (
-            FourierCoeffs.cosine(
-                amplitude=amplitude * jnp.cos(phase),
-                harmonic=harmonic,
-                order=order,
-                frequency=frequency,
-            )
-            - FourierCoeffs.sine(
-                amplitude=amplitude * jnp.sin(phase),
-                harmonic=harmonic,
-                order=order,
-                frequency=frequency,
-            )
-        )
 
-    def __pos__(self) -> "FourierCoeffs":
-        return self
+def _coeff_values(X: ArrayLike) -> jax.Array:
+    """Return the raw coefficient vector."""
+    return jnp.asarray(X)
 
-    def __neg__(self) -> "FourierCoeffs":
-        return FourierCoeffs(values=-jnp.asarray(self.values), frequency=self.frequency)
 
-    def __add__(self, other: object) -> "FourierCoeffs":
-        if not isinstance(other, FourierCoeffs):
-            return NotImplemented
-        return FourierCoeffs(
-            values=jnp.asarray(self.values) + jnp.asarray(other.values),
-            frequency=self.frequency,
-        )
+def _sample_values(x: ArrayLike | SampledSignal) -> jax.Array:
+    """Return the raw sampled signal from an array or a SampledSignal object."""
+    if isinstance(x, SampledSignal):
+        return jnp.asarray(x.values)
+    return jnp.asarray(x)
 
-    def __radd__(self, other: object) -> "FourierCoeffs":
-        if other == 0:
-            return self
-        if not isinstance(other, FourierCoeffs):
-            return NotImplemented
-        return other + self
 
-    def __sub__(self, other: object) -> "FourierCoeffs":
-        if not isinstance(other, FourierCoeffs):
-            return NotImplemented
-        return FourierCoeffs(
-            values=jnp.asarray(self.values) - jnp.asarray(other.values),
-            frequency=self.frequency,
-        )
+def _frequency_to_wd(frequency: ArrayLike) -> jax.Array:
+    """Convert a frequency in Hz to an angular frequency in rad/s."""
+    return 2.0 * jnp.pi * jnp.asarray(frequency)
 
-    def __rsub__(self, other: object) -> "FourierCoeffs":
-        if not isinstance(other, FourierCoeffs):
-            return NotImplemented
-        return other - self
 
-    def __mul__(self, scalar: ArrayLike) -> "FourierCoeffs":
-        return FourierCoeffs(
-            values=jnp.asarray(self.values) * jnp.asarray(scalar),
-            frequency=self.frequency,
-        )
+def _coeffs_table_frame(X: ArrayLike) -> pl.DataFrame:
+    """Return a printable table for a stacked real coefficient vector."""
+    table = coeffs_to_table(X)
+    columns = {"basis": ["cos", "sin"]}
+    for harmonic in range(table.shape[1]):
+        columns[str(harmonic)] = table[:, harmonic].tolist()
+    return pl.DataFrame(columns)
 
-    def __rmul__(self, scalar: ArrayLike) -> "FourierCoeffs":
-        return self * scalar
 
-    def __truediv__(self, scalar: ArrayLike) -> "FourierCoeffs":
-        return FourierCoeffs(
-            values=jnp.asarray(self.values) / jnp.asarray(scalar),
-            frequency=self.frequency,
-        )
+def format_fourier_coeffs(X: ArrayLike) -> str:
+    """Return a compact table repr for a stacked real coefficient vector."""
+    with pl.Config(tbl_width_chars=160, fmt_str_lengths=48):
+        table = _coeffs_table_frame(X)
+    return f"FourierCoeffs\n{table}"
+
+
+def print_fourier_coeffs(X: ArrayLike) -> None:
+    """Print Fourier coefficients with harmonics as columns and basis rows."""
+    print(format_fourier_coeffs(X))
 
 
 class SampledSignal(NamedTuple):
@@ -227,9 +155,6 @@ class SampledSignal(NamedTuple):
     - addition and subtraction between sampled signals
     - unary plus and minus
     - multiplication and division by scalars
-
-    As for `FourierCoeffs`, `frequency` is propagated without runtime checks so
-    the operations remain compatible with `jax.jit`.
 
     Examples
     --------
@@ -326,34 +251,26 @@ class SampledSignal(NamedTuple):
         )
 
 
-def add_fourier_coeffs(a: FourierCoeffs, b: FourierCoeffs) -> FourierCoeffs:
-    """Add two Fourier coefficient containers.
-
-    This helper is equivalent to `a + b` and is compatible with `jax.jit`.
-    Frequency consistency is assumed by contract and is not checked at runtime.
-    """
-    return a + b
+def add_fourier_coeffs(a: ArrayLike, b: ArrayLike) -> jax.Array:
+    """Add two Fourier coefficient vectors."""
+    return jnp.asarray(a) + jnp.asarray(b)
 
 
-def sub_fourier_coeffs(a: FourierCoeffs, b: FourierCoeffs) -> FourierCoeffs:
-    """Subtract two Fourier coefficient containers."""
-    return a - b
+def sub_fourier_coeffs(a: ArrayLike, b: ArrayLike) -> jax.Array:
+    """Subtract two Fourier coefficient vectors."""
+    return jnp.asarray(a) - jnp.asarray(b)
 
 
-def scale_fourier_coeffs(X: FourierCoeffs, scalar: ArrayLike) -> FourierCoeffs:
-    """Multiply a Fourier coefficient container by a scalar."""
-    return X * scalar
+def scale_fourier_coeffs(X: ArrayLike, scalar: ArrayLike) -> jax.Array:
+    """Multiply a Fourier coefficient vector by a scalar."""
+    return jnp.asarray(X) * jnp.asarray(scalar)
 
 
-def sum_fourier_coeffs(*terms: FourierCoeffs) -> FourierCoeffs:
-    """Sum multiple Fourier coefficient containers.
-
-    This helper is meant for building HBM residuals with repeated linear
-    combinations inside JAX-compiled code paths.
-    """
+def sum_fourier_coeffs(*terms: ArrayLike) -> jax.Array:
+    """Sum multiple Fourier coefficient vectors."""
     if len(terms) == 0:
-        raise ValueError("At least one FourierCoeffs term is required.")
-    return sum(terms[1:], start=terms[0])
+        raise ValueError("At least one Fourier coefficient vector is required.")
+    return sum((jnp.asarray(term) for term in terms[1:]), start=jnp.asarray(terms[0]))
 
 
 def add_sampled_signals(a: SampledSignal, b: SampledSignal) -> SampledSignal:
@@ -378,40 +295,7 @@ def sum_sampled_signals(*terms: SampledSignal) -> SampledSignal:
     return sum(terms[1:], start=terms[0])
 
 
-def _harmonic_order_count(coeffs: jax.Array) -> int:
-    """Return the highest retained harmonic order for a stacked real vector."""
-    size = coeffs.size
-    if size < 1 or size % 2 == 0:
-        raise ValueError("HBM coefficient vectors must have odd length 2*N + 1.")
-    return (size - 1) // 2
-
-
-def _require_positive_factor(name: str, value: int) -> None:
-    """Validate integer sampling factors used for FFT domain conversions."""
-    if value < 1:
-        raise ValueError(f"{name} must be >= 1.")
-
-
-def _coeff_values(X: ArrayLike | FourierCoeffs) -> jax.Array:
-    """Return the raw coefficient vector from an array or a FourierCoeffs object."""
-    if isinstance(X, FourierCoeffs):
-        return jnp.asarray(X.values)
-    return jnp.asarray(X)
-
-
-def _sample_values(x: ArrayLike | SampledSignal) -> jax.Array:
-    """Return the raw sampled signal from an array or a SampledSignal object."""
-    if isinstance(x, SampledSignal):
-        return jnp.asarray(x.values)
-    return jnp.asarray(x)
-
-
-def _frequency_to_wd(frequency: ArrayLike) -> jax.Array:
-    """Convert a frequency in Hz to an angular frequency in rad/s."""
-    return 2.0 * jnp.pi * jnp.asarray(frequency)
-
-
-def coeffs_to_complex(X: ArrayLike | FourierCoeffs) -> jax.Array:
+def coeffs_to_complex(X: ArrayLike) -> jax.Array:
     """Convert stacked real Fourier coefficients to positive-frequency phasors."""
     coeffs = _coeff_values(X)
     N = _harmonic_order_count(coeffs)
@@ -421,9 +305,7 @@ def coeffs_to_complex(X: ArrayLike | FourierCoeffs) -> jax.Array:
     return jnp.concatenate([a0[None], a - 1j * b])
 
 
-def complex_to_coeffs(
-    C: ArrayLike, frequency: ArrayLike | None = None
-) -> jax.Array | FourierCoeffs:
+def complex_to_coeffs(C: ArrayLike) -> jax.Array:
     """Convert positive-frequency phasors back to stacked real coefficients."""
     complex_coeffs = jnp.asarray(C)
     if complex_coeffs.size < 1:
@@ -432,49 +314,35 @@ def complex_to_coeffs(
     a = jnp.real(complex_coeffs[1:])
     b = -jnp.imag(complex_coeffs[1:])
     real_dtype = jnp.real(complex_coeffs).dtype
-    values = jnp.concatenate([a0[None], a, b]).astype(real_dtype)
-    if frequency is None:
-        return values
-    return FourierCoeffs(values=values, frequency=jnp.asarray(frequency))
+    return jnp.concatenate([a0[None], a, b]).astype(real_dtype)
 
 
-def coeffs_derivative(
-    X: ArrayLike | FourierCoeffs, wd: ArrayLike | None = None, order: int = 1
-) -> jax.Array | FourierCoeffs:
+def coeffs_derivative(X: ArrayLike, wd: ArrayLike, order: int = 1) -> jax.Array:
     """Differentiate a coefficient vector with respect to time.
 
     Examples
     --------
     >>> import jax.numpy as jnp
-    >>> coeffs = FourierCoeffs(values=jnp.array([0.0, 1.0, 0.0]), frequency=5.0)
-    >>> velocity = coeffs_derivative(coeffs, order=1)
-    >>> print(velocity)
-    FourierCoeffs
-    ...
-    │ frequency ┆ scalar ┆ float32 ┆ 5.0...
-    │ values    ┆ (3,)   ┆ float32 ┆ [  0.      ,   0.      , -31.4...
-    ...
+    >>> coeffs = jnp.array([0.0, 1.0, 0.0])
+    >>> velocity = coeffs_derivative(coeffs, wd=2.0 * jnp.pi * 5.0, order=1)
+    >>> velocity
+    Array([  0.      ,   0.      , -31.415928], dtype=float32)
     """
     if order < 0:
         raise ValueError("order must be a non-negative integer.")
-    if isinstance(X, FourierCoeffs):
-        if wd is not None:
-            raise ValueError("Pass either FourierCoeffs or raw coeffs with wd, not both.")
-        wd = _frequency_to_wd(X.frequency)
-    elif wd is None:
-        raise ValueError("wd must be provided when differentiating raw coefficient arrays.")
     coeffs = coeffs_to_complex(X)
     harmonic_ids = jnp.arange(coeffs.size)
     dcoeffs = (1j * harmonic_ids * jnp.asarray(wd)) ** order * coeffs
-    if isinstance(X, FourierCoeffs):
-        return complex_to_coeffs(dcoeffs, frequency=X.frequency)
     return complex_to_coeffs(dcoeffs)
 
 
-def coeffs_to_table(X: ArrayLike | FourierCoeffs) -> jax.Array:
-    """Return a JAX table with stacked real and imaginary phasor parts."""
-    complex_coeffs = coeffs_to_complex(X)
-    return jnp.stack([jnp.real(complex_coeffs), jnp.imag(complex_coeffs)], axis=0)
+def coeffs_to_table(X: ArrayLike) -> jax.Array:
+    """Return a 2 x (N + 1) table with cosine and sine coefficients."""
+    coeffs = _coeff_values(X)
+    N = _harmonic_order_count(coeffs)
+    cosine = coeffs[: N + 1]
+    sine = jnp.concatenate([jnp.zeros_like(coeffs[:1]), coeffs[N + 1 :]])
+    return jnp.stack([cosine, sine], axis=0)
 
 
 def time_grid(wd: ArrayLike, n: int, oversample: int = 1) -> jax.Array:
@@ -487,21 +355,23 @@ def time_grid(wd: ArrayLike, n: int, oversample: int = 1) -> jax.Array:
 
 
 def coeffs_to_time_signal(
-    X: ArrayLike | FourierCoeffs, oversample: int = 1
+    X: ArrayLike,
+    frequency: ArrayLike | None = None,
+    oversample: int = 1,
 ) -> jax.Array | SampledSignal:
     """Synthesize a real time signal from stacked real Fourier coefficients.
+
+    When ``frequency`` is provided in Hz, the result is wrapped as a
+    ``SampledSignal`` so the time grid is available directly.
 
     Examples
     --------
     >>> import jax.numpy as jnp
-    >>> coeffs = FourierCoeffs(values=jnp.array([0.0, 1.0, 0.0]), frequency=5.0)
-    >>> signal = coeffs_to_time_signal(coeffs, oversample=4)
-    >>> print(signal)
-    SampledSignal
-    ...
-    │ frequency ┆ scalar ┆ float32 ┆ 5.0...
-    │ values    ┆ (8,)   ┆ float32 ┆ [1.        , 0.70710677, 0.   ...
-    ...
+    >>> coeffs = jnp.array([0.0, 1.0, 0.0])
+    >>> signal = coeffs_to_time_signal(coeffs, frequency=5.0, oversample=4)
+    >>> signal.values
+    Array([ 1.0000000e+00,  7.0710677e-01, -4.3711388e-08, -7.0710677e-01,
+           -1.0000000e+00, -7.0710677e-01,  1.1924881e-08,  7.0710677e-01],      dtype=float32)
     """
     _require_positive_factor("oversample", oversample)
     complex_coeffs = coeffs_to_complex(X)
@@ -512,19 +382,19 @@ def coeffs_to_time_signal(
     fft_coeffs = complex_coeffs * (sample_count / 2.0)
     fft_coeffs = fft_coeffs.at[0].set(complex_coeffs[0] * sample_count)
     values = jnp.fft.irfft(fft_coeffs, n=sample_count).real
-    if isinstance(X, FourierCoeffs):
-        frequency = jnp.asarray(X.frequency)
-        if jnp.any(frequency == 0):
-            raise ValueError(
-                "FourierCoeffs.frequency must be non-zero to build a sampled signal."
-            )
-        return SampledSignal(values=values, frequency=frequency)
-    return values
+    if frequency is None:
+        return values
+
+    frequency = jnp.asarray(frequency)
+    try:
+        if bool(jnp.any(frequency == 0)):
+            raise ValueError("frequency must be non-zero to build a sampled signal.")
+    except jax.errors.TracerBoolConversionError:
+        pass
+    return SampledSignal(values=values, frequency=frequency)
 
 
-def time_to_coeffs(
-    x: ArrayLike | SampledSignal, downsample: int = 1
-) -> jax.Array | FourierCoeffs:
+def time_to_coeffs(x: ArrayLike | SampledSignal, downsample: int = 1) -> jax.Array:
     """Project a sampled real time signal back onto the HBM basis.
 
     Examples
@@ -535,37 +405,23 @@ def time_to_coeffs(
     ...     frequency=5.0,
     ... )
     >>> coeffs = time_to_coeffs(signal, downsample=4)
-    >>> print(coeffs)
-    FourierCoeffs
-    ...
-    │ frequency ┆ scalar ┆ float32 ┆ 5.0...
-    │ values    ┆ (5,)   ┆ float32 ┆ [ 4.0854182e-08,  1.0000000e+0...
-    ...
+    >>> coeffs
+    Array([ 4.0854182e-08,  1.0000000e+00, -3.7318731e-08,  0.0000000e+00,
+            0.0000000e+00], dtype=float32)
     """
     _require_positive_factor("downsample", downsample)
     signal = _sample_values(x)
     sample_count = signal.size
     if sample_count != 1 and sample_count % (2 * downsample) != 0:
-        raise ValueError(
-            "Signal length must be 1 or divisible by 2 * downsample."
-        )
+        raise ValueError("Signal length must be 1 or divisible by 2 * downsample.")
 
     fft_coeffs = jnp.fft.rfft(signal) * 2.0 / sample_count
     fft_coeffs = fft_coeffs.at[0].set(fft_coeffs[0] * 0.5)
     kept_coeffs = fft_coeffs[: sample_count // (2 * downsample) + 1]
-    if isinstance(x, SampledSignal):
-        return complex_to_coeffs(kept_coeffs, frequency=jnp.asarray(x.frequency))
     return complex_to_coeffs(kept_coeffs)
 
 
-def coeffs_pow(
-    X: ArrayLike | FourierCoeffs, p: ArrayLike, oversample: int = 1
-) -> jax.Array | FourierCoeffs:
+def coeffs_pow(X: ArrayLike, p: ArrayLike, oversample: int = 1) -> jax.Array:
     """Raise a periodic signal to a power and re-project it onto the HBM basis."""
     signal = coeffs_to_time_signal(X, oversample=oversample)
-    if isinstance(signal, SampledSignal):
-        return time_to_coeffs(
-            SampledSignal(values=signal.values ** p, frequency=signal.frequency),
-            downsample=oversample,
-        )
     return time_to_coeffs(signal ** p, downsample=oversample)

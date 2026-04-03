@@ -48,7 +48,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from kinamax.hbm import (
-    FourierCoeffs,
     coeffs_derivative,
     coeffs_to_complex,
     coeffs_to_time_signal,
@@ -322,12 +321,11 @@ display(HTML(fig.to_html(include_plotlyjs="cdn")))
 resonance_index = int(jnp.argmin(jnp.abs(frequency_ratio - 1.0)))
 wd_res = params.wd[resonance_index]
 X_res = coeffs[resonance_index]
-resonance_coeffs = FourierCoeffs(
-    values=X_res,
+response_signal = coeffs_to_time_signal(
+    X_res,
     frequency=wd_res / (2.0 * jnp.pi),
+    oversample=64,
 )
-
-response_signal = coeffs_to_time_signal(resonance_coeffs, oversample=64)
 time = response_signal.time_grid
 input_signal = params.A * jnp.cos(wd_res * time)
 

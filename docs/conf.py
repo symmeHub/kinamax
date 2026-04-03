@@ -81,10 +81,15 @@ import jax.numpy as jnp
 from diffrax import PIDController, Tsit5
 
 from kinamax.hbm import (
-    FourierCoeffs,
     SampledSignal,
     coeffs_derivative,
     coeffs_to_time_signal,
+    cosine_forcing,
+    format_fourier_coeffs,
+    fourier_zeros,
+    phased_forcing,
+    print_fourier_coeffs,
+    sine_forcing,
     time_to_coeffs,
 )
 from kinamax.integration.core import (

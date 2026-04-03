@@ -208,3 +208,4 @@ __marimo__/
 
 *.parquet
 *.DS_Store
+docs/examples/hbm/dual_linear_capa_demo.ipynb
